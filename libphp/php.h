@@ -237,6 +237,14 @@ void php_str_repeat(zval* str, zval* count, zval* result);
 void php_file_exists(zval* path, zval* result);
 
 /**
+ * Execute a command via shell and return the output.
+ *
+ * @param cmd The command to execute
+ * @param result The result zval (will contain command output or null on error)
+ */
+void php_shell_exec(zval* cmd, zval* result);
+
+/**
  * Strict inequality comparison (!==).
  * Returns true if values are not identical (different types or different values).
  *

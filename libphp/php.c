@@ -24,9 +24,14 @@ void php_zval_int(zval* z, int int_val) {
 
 void php_zval_string(zval* z, const char* str) {
     z->type = PHP_TYPE_STRING;
-    // For now, we'll just store the pointer directly without copying
-    // This is not ideal, but will work for our test
-    z->value.str_val = (char*)str;
+    // Duplicate the string to ensure we own the memory
+    // Note: This creates a memory leak since we never free these strings,
+    // but it's necessary to avoid dangling pointers from temporary buffers
+    if (str) {
+        z->value.str_val = strdup(str);
+    } else {
+        z->value.str_val = NULL;
+    }
 }
 
 // Zval conversion functions - uses rotating buffers to avoid overwriting
@@ -813,4 +818,72 @@ void php_zval_strict_eq(zval* a, zval* b, zval* result) {
     }
 
     php_zval_bool(result, equal);
+}
+
+// shell_exec implementation - Windows compatible
+void php_shell_exec(zval* cmd, zval* result) {
+    if (cmd->type != PHP_TYPE_STRING || cmd->value.str_val == NULL) {
+        php_zval_null(result);
+        return;
+    }
+
+    #ifdef _WIN32
+    // Windows: use _popen
+    FILE* fp = _popen(cmd->value.str_val, "r");
+    #else
+    // POSIX: use popen
+    FILE* fp = popen(cmd->value.str_val, "r");
+    #endif
+
+    if (fp == NULL) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Read the output
+    char buffer[1024];
+    size_t output_size = 0;
+    char* output = malloc(1);
+    if (!output) {
+        #ifdef _WIN32
+        _pclose(fp);
+        #else
+        pclose(fp);
+        #endif
+        php_zval_null(result);
+        return;
+    }
+    output[0] = '\0';
+
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        size_t len = strlen(buffer);
+        char* new_output = realloc(output, output_size + len + 1);
+        if (!new_output) {
+            free(output);
+            #ifdef _WIN32
+            _pclose(fp);
+            #else
+            pclose(fp);
+            #endif
+            php_zval_null(result);
+            return;
+        }
+        output = new_output;
+        strcpy(output + output_size, buffer);
+        output_size += len;
+    }
+
+    #ifdef _WIN32
+    _pclose(fp);
+    #else
+    pclose(fp);
+    #endif
+
+    // Store result (trim trailing newline if present, matching PHP behavior)
+    if (output_size > 0 && output[output_size - 1] == '\n') {
+        output[output_size - 1] = '\0';
+    }
+
+    php_zval_string(result, output);
+    free(output);
 }

@@ -39,4 +39,8 @@ foreach ($testFiles as $testFile) {
     }
 
     echo "Testing $testFile...\n";
+
+    // 1. Run with PHP
+    $phpOutput = shell_exec("$phpPath $testPath 2>&1");
+    echo $phpOutput . "\n";
 }
