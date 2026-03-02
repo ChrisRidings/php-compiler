@@ -3,3 +3,6 @@ output.bc
 output.obj
 stdlib.obj
 output.ll
+php.obj
+test.exe
+libphp/libphp.a

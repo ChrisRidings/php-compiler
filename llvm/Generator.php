@@ -54,7 +54,19 @@ class Generator
         $ir[] = "target triple = \"x86_64-pc-windows-msvc\"";
         $ir[] = "";
 
-        // Declare external function for php_echo
+        // Define zval struct type (matches C struct layout exactly for x86_64)
+        $ir[] = "%struct.zval = type { i32, %union.zval_value }";
+        $ir[] = "%union.zval_value = type { i64 }"; // on x86_64, all union members are 8 bytes
+        $ir[] = "";
+
+        // Declare external zval functions (pass by pointer)
+        $ir[] = "declare void @php_echo_zval(%struct.zval*)";
+        $ir[] = "declare void @php_zval_null(%struct.zval*)";
+        $ir[] = "declare void @php_zval_bool(%struct.zval*, i32)";
+        $ir[] = "declare void @php_zval_int(%struct.zval*, i32)";
+        $ir[] = "declare void @php_zval_string(%struct.zval*, i8*)";
+        $ir[] = "declare i8* @php_zval_to_string(%struct.zval*)";
+        $ir[] = "declare i32 @php_zval_to_int(%struct.zval*)";
         $ir[] = "declare void @php_echo(i8*)";
         $ir[] = "declare i8* @php_itoa(i32)";
         $ir[] = "";
@@ -160,93 +172,45 @@ class Generator
     private function generateReturnStatement(ReturnStatement $returnStmt, array &$ir, array $globalVars): void
     {
         if ($returnStmt->value === null) {
-            $ir[] = "  ret void";
-        } elseif ($returnStmt->value instanceof IntegerLiteral) {
-            $ir[] = "  ret i32 " . $returnStmt->value->value;
+            $nullResult = $this->getNextTempVariable();
+            $ir[] = "  {$nullResult} = call %struct.zval @php_zval_null()";
+            $ir[] = "  ret %struct.zval {$nullResult}";
         } else {
-            // For now, we'll return 0 for non-integer returns
-            $ir[] = "  ret i32 0";
+            $result = $this->generateExpression($returnStmt->value, $ir, $globalVars);
+            $ir[] = "  ret %struct.zval {$result}";
         }
         $ir[] = "";
     }
 
     private function generateAssignment(Assignment $assignment, array &$ir, array $globalVars): void
     {
-        // For this test case, treat $x as an integer variable
-        static $xAllocated = false;
-        if ($assignment->variable->name === 'x') {
-            if (!$xAllocated) {
-                $ir[] = "  %x = alloca i32";
-                $xAllocated = true;
-            }
+        // All variables are stored as zval structs on the stack
+        $varName = $assignment->variable->name;
+        $ir[] = "  %{$varName} = alloca %struct.zval";
 
-            if ($assignment->value instanceof BinaryOperation) {
-                // evaluate $value as integer and store
-                $result = $this->generateExpressionAsInteger($assignment->value, $ir, $globalVars);
-                $ir[] = "  store i32 {$result}, i32* %x";
-            } elseif ($assignment->value instanceof IntegerLiteral) {
-                $ir[] = "  store i32 " . $assignment->value->value . ", i32* %x";
-            } elseif ($assignment->value instanceof VariableReference && $assignment->value->name === 'x') {
-                // $x = $x
-                $ir[] = "  %tmp_load = load i32, i32* %x";
-                $ir[] = "  store i32 %tmp_load, i32* %x";
-            } else {
-                $ir[] = "  store i32 0, i32* %x";
-            }
-        } else {
-            // Check if value is a function call that returns an integer
-            $isIntegerReturn = false;
-            if ($assignment->value instanceof FunctionCall) {
-                $isIntegerReturn = true;
-            }
+        // Generate value to assign
+        $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
 
-            if ($isIntegerReturn) {
-                $ir[] = "  %{$assignment->variable->name} = alloca i32";
-
-                if ($assignment->value instanceof FunctionCall) {
-                    $args = [];
-                    foreach ($assignment->value->arguments as $arg) {
-                        if ($arg instanceof StringLiteral) {
-                            $globalName = "__str_const_" . md5($arg->value);
-                            $globalData = $globalVars[$globalName];
-                            $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
-                            $args[] = "i8* %{$globalName}_ptr";
-                        }
-                    }
-                    $argStr = implode(', ', $args);
-                    $ir[] = "  %call_result = call i32 @{$assignment->value->name}({$argStr})";
-                    $ir[] = "  store i32 %call_result, i32* %{$assignment->variable->name}";
-                }
-            } else {
-                $ir[] = "  %{$assignment->variable->name} = alloca i8*";
-
-                if ($assignment->value instanceof StringLiteral) {
-                    $globalName = "__str_const_" . md5($assignment->value->value);
-                    $globalData = $globalVars[$globalName];
-                    $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
-                    $ir[] = "  store i8* %{$globalName}_ptr, i8** %{$assignment->variable->name}";
-                } else {
-                    $ir[] = "  store i8* null, i8** %{$assignment->variable->name}";
-                }
-            }
-        }
+        // Load the value from the generated expression's pointer and store it
+        $value = $this->getNextTempVariable();
+        $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
+        $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
 
         $ir[] = "";
     }
 
     private function generateFunctionDefinition(FunctionDefinition $funcDef, array &$ir, array $globalVars): void
     {
-        $returnType = "void";
-        foreach ($funcDef->body as $statement) {
-            if ($statement instanceof ReturnStatement && $statement->value instanceof IntegerLiteral) {
-                $returnType = "i32";
-                break;
-            }
-        }
-
-        $paramTypes = implode(', ', array_fill(0, count($funcDef->parameters), 'i8*'));
-        $ir[] = "define {$returnType} @{$funcDef->name}({$paramTypes}) {";
+        // All functions return zval and parameters are zval
+        $paramTypes = implode(', ', array_fill(0, count($funcDef->parameters), '%struct.zval'));
+        $ir[] = "define %struct.zval @{$funcDef->name}({$paramTypes}) {";
         $ir[] = "entry:";
+
+        // Allocate stack space for parameters
+        foreach ($funcDef->parameters as $i => $param) {
+            $ir[] = "  %{$param->name} = alloca %struct.zval";
+            $ir[] = "  store %struct.zval %{$i}, %struct.zval* %{$param->name}";
+        }
 
         foreach ($funcDef->body as $statement) {
             $this->generateStatement($statement, $ir, $globalVars);
@@ -261,11 +225,9 @@ class Generator
         }
 
         if (!$hasReturn) {
-            if ($returnType === "void") {
-                $ir[] = "  ret void";
-            } else {
-                $ir[] = "  ret i32 0";
-            }
+            $nullResult = $this->getNextTempVariable();
+            $ir[] = "  {$nullResult} = call %struct.zval @php_zval_null()";
+            $ir[] = "  ret %struct.zval {$nullResult}";
         }
 
         $ir[] = "}";
@@ -297,20 +259,22 @@ class Generator
     private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void
     {
         foreach ($statement->expressions as $expression) {
-            $this->generateExpression($expression, $ir, $globalVars);
+            $zvalPtr = $this->generateExpression($expression, $ir, $globalVars);
+            $ir[] = "  call void @php_echo_zval(%struct.zval* {$zvalPtr})";
         }
+        $ir[] = "";
     }
 
-    private function generateExpression(Node $expression, array &$ir, array $globalVars): void
+    private function generateExpression(Node $expression, array &$ir, array $globalVars): string
     {
         if ($expression instanceof StringLiteral) {
-            $this->generateStringLiteral($expression, $ir, $globalVars);
+            return $this->generateStringLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof VariableReference) {
-            $this->generateVariableReference($expression, $ir, $globalVars);
+            return $this->generateVariableReference($expression, $ir, $globalVars);
         } elseif ($expression instanceof IntegerLiteral) {
-            $this->generateIntegerLiteral($expression, $ir, $globalVars);
+            return $this->generateIntegerLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof BinaryOperation) {
-            $this->generateBinaryOperation($expression, $ir, $globalVars);
+            return $this->generateBinaryOperation($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -323,56 +287,82 @@ class Generator
         }
     }
 
-    private function generateIntegerLiteral(IntegerLiteral $literal, array &$ir, array $globalVars): void
+    private function generateIntegerLiteral(IntegerLiteral $literal, array &$ir, array $globalVars): string
     {
-        // To print an integer, we need to convert it to a string first
-        // For now, we'll just print the integer as a string literal
-        $intStr = (string)$literal->value;
-        $globalName = "__str_const_" . md5($intStr);
-
-        if (!isset($globalVars[$globalName])) {
-            $globalVars[$globalName] = [
-                'value' => $intStr,
-                'escapedValue' => $this->escapeString($intStr),
-                'length' => strlen($intStr) + 1
-            ];
-        }
-
-        $globalData = $globalVars[$globalName];
-        $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
-        $ir[] = "  call void @php_echo(i8* %{$globalName}_ptr)";
-        $ir[] = "";
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 " . $literal->value . ")";
+        // We can't return the struct directly, but since we'll be passing pointers around,
+        // return the pointer here
+        return $result;
     }
 
     private function generateBinaryOperation(BinaryOperation $op, array &$ir, array $globalVars): string
     {
-        // generate left operand (must be evaluated and stored as integer)
-        $leftValue = $this->generateExpressionAsInteger($op->left, $ir, $globalVars);
+        $leftZval = $this->generateExpression($op->left, $ir, $globalVars);
+        $rightZval = $this->generateExpression($op->right, $ir, $globalVars);
 
-        // generate right operand
-        $rightValue = $this->generateExpressionAsInteger($op->right, $ir, $globalVars);
-
-        // apply operation
-        $resultValue = $this->getNextTempVariable();
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
 
         switch ($op->operator) {
-            case BinaryOperation::OP_ADD:
-                $ir[] = "  {$resultValue} = add i32 {$leftValue}, {$rightValue}";
+            case '+':
+            case '-':
+            case '*':
+            case '/':
+                // Convert both operands to integers
+                $leftInt = $this->getNextTempVariable();
+                $rightInt = $this->getNextTempVariable();
+                $ir[] = "  {$leftInt} = call i32 @php_zval_to_int(%struct.zval* {$leftZval})";
+                $ir[] = "  {$rightInt} = call i32 @php_zval_to_int(%struct.zval* {$rightZval})";
+
+                $intResult = $this->getNextTempVariable();
+
+                switch ($op->operator) {
+                    case '+':
+                        $ir[] = "  {$intResult} = add i32 {$leftInt}, {$rightInt}";
+                        break;
+                    case '-':
+                        $ir[] = "  {$intResult} = sub i32 {$leftInt}, {$rightInt}";
+                        break;
+                    case '*':
+                        $ir[] = "  {$intResult} = mul i32 {$leftInt}, {$rightInt}";
+                        break;
+                    case '/':
+                        $ir[] = "  {$intResult} = sdiv i32 {$leftInt}, {$rightInt}"; // signed division
+                        break;
+                }
+
+                $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 {$intResult})";
                 break;
-            case BinaryOperation::OP_SUBTRACT:
-                $ir[] = "  {$resultValue} = sub i32 {$leftValue}, {$rightValue}";
+            case '.':
+                // String concatenation - convert both to strings (this is simplification for now)
+                $leftStr = $this->getNextTempVariable();
+                $rightStr = $this->getNextTempVariable();
+                $ir[] = "  {$leftStr} = call i8* @php_zval_to_string(%struct.zval* {$leftZval})";
+                $ir[] = "  {$rightStr} = call i8* @php_zval_to_string(%struct.zval* {$rightZval})";
+
+                // For string concatenation, we'd need a helper function - for now, just treat as string literal
+                $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* {$leftStr})";
                 break;
-            case BinaryOperation::OP_MULTIPLY:
-                $ir[] = "  {$resultValue} = mul i32 {$leftValue}, {$rightValue}";
-                break;
-            case BinaryOperation::OP_DIVIDE:
-                $ir[] = "  {$resultValue} = sdiv i32 {$leftValue}, {$rightValue}"; // signed division
+            case '==':
+                // Comparison - this is a simplification for now
+                // We'll convert both to integers for comparison
+                $leftInt = $this->getNextTempVariable();
+                $rightInt = $this->getNextTempVariable();
+                $ir[] = "  {$leftInt} = call i32 @php_zval_to_int(%struct.zval* {$leftZval})";
+                $ir[] = "  {$rightInt} = call i32 @php_zval_to_int(%struct.zval* {$rightZval})";
+
+                $compareResult = $this->getNextTempVariable();
+                $ir[] = "  {$compareResult} = icmp eq i32 {$leftInt}, {$rightInt}";
+                $ir[] = "  %cmp_bool = zext i1 {$compareResult} to i32";
+                $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 %cmp_bool)";
                 break;
             default:
                 throw new \RuntimeException("Unsupported binary operation: " . $op->operator);
         }
 
-        return $resultValue;
+        return $result;
     }
 
     private function generateExpressionAsInteger(\PhpCompiler\AST\Expression $expr, array &$ir, array $globalVars): string
@@ -397,37 +387,22 @@ class Generator
         return $var;
     }
 
-    private function generateVariableReference(VariableReference $varRef, array &$ir, array $globalVars): void
+    private function generateVariableReference(VariableReference $varRef, array &$ir, array $globalVars): string
     {
-        // Check if variable is a parameter or local variable
-        if ($varRef->name === 'name') {
-            $ir[] = "  call void @php_echo(i8* %0)";
-        } elseif ($varRef->name === 'result') {
-            $ir[] = "  %result_val = load i32, i32* %result";
-            $ir[] = "  %result_str_ptr = call i8* @php_itoa(i32 %result_val)";
-            $ir[] = "  call void @php_echo(i8* %result_str_ptr)";
-        } elseif ($varRef->name === 'x') {
-            $ir[] = "  %x_val = load i32, i32* %x";
-            $ir[] = "  %x_str_ptr = call i8* @php_itoa(i32 %x_val)";
-            $ir[] = "  call void @php_echo(i8* %x_str_ptr)";
-        } else {
-            $ir[] = "  %{$varRef->name}_ptr = load i8*, i8** %{$varRef->name}";
-            $ir[] = "  call void @php_echo(i8* %{$varRef->name}_ptr)";
-        }
-        $ir[] = "";
+        // Variable is already a pointer to zval, just return it
+        return "%" . $varRef->name;
     }
 
-    private function generateStringLiteral(StringLiteral $literal, array &$ir, array $globalVars): void
+    private function generateStringLiteral(StringLiteral $literal, array &$ir, array $globalVars): string
     {
         $globalName = "__str_const_" . md5($literal->value);
-
-        // Get pointer to the string
         $globalData = $globalVars[$globalName];
         $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
 
-        // Call php_echo function
-        $ir[] = "  call void @php_echo(i8* %{$globalName}_ptr)";
-        $ir[] = "";
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* %{$globalName}_ptr)";
+        return $result;
     }
 
     private function escapeString(string $str): string
