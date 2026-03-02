@@ -22,6 +22,7 @@ use PhpCompiler\AST\DoWhileStatement;
 use PhpCompiler\AST\ArrayLiteral;
 use PhpCompiler\AST\ArrayAccess;
 use PhpCompiler\AST\ArrayAssignment;
+use PhpCompiler\AST\ForeachStatement;
 
 class Parser
 {
@@ -111,6 +112,9 @@ class Parser
         } elseif ($token->type === TokenType::T_DO) {
             // Do-while statement
             return $this->parseDoWhileStatement();
+        } elseif ($token->type === TokenType::T_FOREACH) {
+            // Foreach statement
+            return $this->parseForeachStatement();
         }
 
         // Provide better error information
@@ -481,6 +485,39 @@ class Parser
         $this->consumeTokenOfType(TokenType::T_SEMICOLON);
 
         return new DoWhileStatement($body, $condition, $doToken->line, $doToken->column);
+    }
+
+    private function parseForeachStatement(): ForeachStatement
+    {
+        $foreachToken = $this->consumeToken(); // Consume 'foreach'
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        // Parse the array expression
+        $arrayExpr = $this->parseExpression();
+
+        $this->consumeTokenOfType(TokenType::T_AS);
+
+        // Parse the value variable (and optionally key variable)
+        $keyVar = null;
+        $valueVarToken = $this->consumeTokenOfType(TokenType::T_VARIABLE);
+        $valueVar = new VariableReference(ltrim($valueVarToken->value, '$'), $valueVarToken->line, $valueVarToken->column);
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        // Body
+        $body = [];
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LBRACE) {
+            $this->consumeTokenOfType(TokenType::T_LBRACE);
+            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+                $body[] = $this->parseStatement();
+            }
+            $this->consumeTokenOfType(TokenType::T_RBRACE);
+        } elseif ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
+            // Single statement body without braces
+            $body[] = $this->parseStatement();
+        }
+
+        return new ForeachStatement($arrayExpr, $valueVar, $body, $keyVar, $foreachToken->line, $foreachToken->column);
     }
 
     private function parseIfStatement(): IfStatement

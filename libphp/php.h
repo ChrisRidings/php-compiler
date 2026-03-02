@@ -142,6 +142,14 @@ void php_array_set(zval* arr, const char* key, zval* value);
  */
 void php_array_set_by_index(zval* arr, int index, zval* value);
 
+/**
+ * Gets the size of an array.
+ *
+ * @param arr The array zval
+ * @return The number of elements in the array
+ */
+int php_array_size(zval* arr);
+
 #ifdef __cplusplus
 }
 #endif

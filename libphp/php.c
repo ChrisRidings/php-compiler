@@ -312,3 +312,12 @@ void php_array_set_by_index(zval* arr, int index, zval* value) {
         array->size = index + 1;
     }
 }
+
+int php_array_size(zval* arr) {
+    if (arr->type != PHP_TYPE_ARRAY) return 0;
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) return 0;
+
+    return array->size;
+}

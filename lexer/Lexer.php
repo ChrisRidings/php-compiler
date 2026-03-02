@@ -24,6 +24,8 @@ class Lexer
         TokenType::T_FOR->value => '/^for\b/i',
         TokenType::T_WHILE->value => '/^while\b/i',
         TokenType::T_DO->value => '/^do\b/i',
+        TokenType::T_FOREACH->value => '/^foreach\b/i',
+        TokenType::T_AS->value => '/^as\b/i',
         TokenType::T_STRING->value => '/^"(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\'/',
         TokenType::T_INTEGER->value => '/^\d+/',
         TokenType::T_VARIABLE->value => '/^\$[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*/',

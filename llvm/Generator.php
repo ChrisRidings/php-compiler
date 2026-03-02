@@ -24,6 +24,7 @@ use PhpCompiler\AST\DoWhileStatement;
 use PhpCompiler\AST\ArrayLiteral;
 use PhpCompiler\AST\ArrayAccess;
 use PhpCompiler\AST\ArrayAssignment;
+use PhpCompiler\AST\ForeachStatement;
 
 class Generator
 {
@@ -88,6 +89,7 @@ class Generator
         $ir[] = "declare void @php_array_get(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_array_set(%struct.zval*, i8*, %struct.zval*)";
         $ir[] = "declare void @php_array_set_by_index(%struct.zval*, i32, %struct.zval*)";
+        $ir[] = "declare i32 @php_array_size(%struct.zval*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -213,6 +215,11 @@ class Generator
             foreach ($node->body as $statement) {
                 $this->collectGlobals($statement, $globalVars);
             }
+        } elseif ($node instanceof ForeachStatement) {
+            $this->collectGlobals($node->array, $globalVars);
+            foreach ($node->body as $statement) {
+                $this->collectGlobals($statement, $globalVars);
+            }
         } elseif ($node instanceof ArrayLiteral) {
             foreach ($node->elements as $element) {
                 $this->collectGlobals($element, $globalVars);
@@ -272,6 +279,8 @@ class Generator
             $this->generateWhileStatement($statement, $ir, $globalVars);
         } elseif ($statement instanceof DoWhileStatement) {
             $this->generateDoWhileStatement($statement, $ir, $globalVars);
+        } elseif ($statement instanceof ForeachStatement) {
+            $this->generateForeachStatement($statement, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -759,6 +768,80 @@ class Generator
 
         // Branch if true back to body, otherwise to after loop
         $ir[] = "  br i1 {$isTrue}, label %{$loopBodyBlock}, label %{$loopAfterBlock}";
+
+        // After loop block
+        $ir[] = "{$loopAfterBlock}:";
+        $ir[] = "";
+    }
+
+    private function generateForeachStatement(ForeachStatement $foreachStmt, array &$ir, array $globalVars): void
+    {
+        // Create basic blocks for foreach loop
+        static $blockCounter = 0;
+        $loopHeaderBlock = "foreach_header_" . ++$blockCounter;
+        $loopBodyBlock = "foreach_body_" . $blockCounter;
+        $loopAfterBlock = "foreach_after_" . $blockCounter;
+
+        // Get the array expression
+        $arrayPtr = $this->generateExpression($foreachStmt->array, $ir, $globalVars);
+
+        // Create index variable (hidden from user)
+        $indexVar = "%foreach_idx_" . $blockCounter;
+        $ir[] = "  {$indexVar} = alloca i32";
+        $ir[] = "  store i32 0, i32* {$indexVar}";
+
+        // Get array size
+        $arraySize = $this->getNextTempVariable();
+        $ir[] = "  {$arraySize} = call i32 @php_array_size(%struct.zval* {$arrayPtr})";
+
+        // Declare the value variable if not already declared
+        $valueVarName = $foreachStmt->valueVar->name;
+        if (!isset($this->declaredVars[$valueVarName])) {
+            $ir[] = "  %{$valueVarName} = alloca %struct.zval";
+            $this->declaredVars[$valueVarName] = true;
+        }
+
+        // Jump to loop header
+        $ir[] = "  br label %{$loopHeaderBlock}";
+
+        // Loop header block - check if index < array_size
+        $ir[] = "{$loopHeaderBlock}:";
+        $currentIndex = $this->getNextTempVariable();
+        $ir[] = "  {$currentIndex} = load i32, i32* {$indexVar}";
+
+        $indexLessThanSize = $this->getNextTempVariable();
+        $ir[] = "  {$indexLessThanSize} = icmp slt i32 {$currentIndex}, {$arraySize}";
+        $ir[] = "  br i1 {$indexLessThanSize}, label %{$loopBodyBlock}, label %{$loopAfterBlock}";
+
+        // Loop body block
+        $ir[] = "{$loopBodyBlock}:";
+
+        // Get array element at current index: $array[$currentIndex]
+        $indexZval = $this->getNextTempVariable();
+        $ir[] = "  {$indexZval} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_int(%struct.zval* {$indexZval}, i32 {$currentIndex})";
+
+        $elemZval = $this->getNextTempVariable();
+        $ir[] = "  {$elemZval} = alloca %struct.zval";
+        $ir[] = "  call void @php_array_get(%struct.zval* {$elemZval}, %struct.zval* {$arrayPtr}, %struct.zval* {$indexZval})";
+
+        // Store element in value variable
+        $elemVal = $this->getNextTempVariable();
+        $ir[] = "  {$elemVal} = load %struct.zval, %struct.zval* {$elemZval}";
+        $ir[] = "  store %struct.zval {$elemVal}, %struct.zval* %{$valueVarName}";
+
+        // Generate body statements
+        foreach ($foreachStmt->body as $statement) {
+            $this->generateStatement($statement, $ir, $globalVars);
+        }
+
+        // Increment index
+        $nextIndex = $this->getNextTempVariable();
+        $ir[] = "  {$nextIndex} = add i32 {$currentIndex}, 1";
+        $ir[] = "  store i32 {$nextIndex}, i32* {$indexVar}";
+
+        // Jump back to header
+        $ir[] = "  br label %{$loopHeaderBlock}";
 
         // After loop block
         $ir[] = "{$loopAfterBlock}:";
