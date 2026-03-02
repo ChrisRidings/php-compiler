@@ -21,6 +21,8 @@ use PhpCompiler\AST\IfStatement;
 use PhpCompiler\AST\ForStatement;
 use PhpCompiler\AST\WhileStatement;
 use PhpCompiler\AST\DoWhileStatement;
+use PhpCompiler\AST\ArrayLiteral;
+use PhpCompiler\AST\ArrayAccess;
 
 class Generator
 {
@@ -80,6 +82,9 @@ class Generator
         $ir[] = "declare void @php_echo(i8*)";
         $ir[] = "declare i8* @php_itoa(i32)";
         $ir[] = "declare i8* @php_concat_strings(i8*, i8*)";
+        $ir[] = "declare void @php_array_create(%struct.zval*, i32)";
+        $ir[] = "declare void @php_array_append(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_array_get(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -202,6 +207,13 @@ class Generator
             foreach ($node->body as $statement) {
                 $this->collectGlobals($statement, $globalVars);
             }
+        } elseif ($node instanceof ArrayLiteral) {
+            foreach ($node->elements as $element) {
+                $this->collectGlobals($element, $globalVars);
+            }
+        } elseif ($node instanceof ArrayAccess) {
+            $this->collectGlobals($node->array, $globalVars);
+            $this->collectGlobals($node->index, $globalVars);
         } elseif ($node instanceof BinaryOperation) {
             $this->collectGlobals($node->left, $globalVars);
             $this->collectGlobals($node->right, $globalVars);
@@ -419,6 +431,10 @@ class Generator
             $ir[] = "  store %struct.zval %call_result, %struct.zval* {$result}";
 
             return $result;
+        } elseif ($expression instanceof ArrayLiteral) {
+            return $this->generateArrayLiteral($expression, $ir, $globalVars);
+        } elseif ($expression instanceof ArrayAccess) {
+            return $this->generateArrayAccess($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -794,6 +810,45 @@ class Generator
         $result = $this->getNextTempVariable();
         $ir[] = "  {$result} = alloca %struct.zval";
         $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* {$ptrName})";
+        return $result;
+    }
+
+    private function generateArrayLiteral(ArrayLiteral $arrayLit, array &$ir, array $globalVars): string
+    {
+        // For now, we'll create a simple array representation using an alloca'd pointer
+        // This is a simplified approach - arrays are stored as pointers to zval arrays
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+
+        // Call runtime function to create array with given size
+        $sizeVal = count($arrayLit->elements);
+        $ir[] = "  call void @php_array_create(%struct.zval* {$result}, i32 {$sizeVal})";
+
+        // Add each element to the array
+        foreach ($arrayLit->elements as $index => $element) {
+            $elemPtr = $this->generateExpression($element, $ir, $globalVars);
+            $indexVal = $index;
+            $ir[] = "  call void @php_array_append(%struct.zval* {$result}, %struct.zval* {$elemPtr})";
+        }
+
+        return $result;
+    }
+
+    private function generateArrayAccess(ArrayAccess $arrayAccess, array &$ir, array $globalVars): string
+    {
+        // Generate the array expression first
+        $arrayPtr = $this->generateExpression($arrayAccess->array, $ir, $globalVars);
+
+        // Generate the index expression
+        $indexPtr = $this->generateExpression($arrayAccess->index, $ir, $globalVars);
+
+        // Allocate result zval
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+
+        // Call runtime function to get array element
+        $ir[] = "  call void @php_array_get(%struct.zval* {$result}, %struct.zval* {$arrayPtr}, %struct.zval* {$indexPtr})";
+
         return $result;
     }
 

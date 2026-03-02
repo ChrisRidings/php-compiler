@@ -158,3 +158,64 @@ char* php_concat_strings(const char* str1, const char* str2) {
 
     return result;
 }
+
+// Array implementation
+#define PHP_ARRAY_INITIAL_CAPACITY 8
+
+typedef struct php_array {
+    zval* elements;
+    int size;
+    int capacity;
+} php_array;
+
+void php_array_create(zval* z, int initial_capacity) {
+    z->type = PHP_TYPE_ARRAY;
+    php_array* arr = (php_array*)malloc(sizeof(php_array));
+    if (!arr) return;
+
+    arr->size = 0;
+    arr->capacity = initial_capacity > 0 ? initial_capacity : PHP_ARRAY_INITIAL_CAPACITY;
+    arr->elements = (zval*)malloc(sizeof(zval) * arr->capacity);
+    if (!arr->elements) {
+        free(arr);
+        return;
+    }
+
+    // Store the array pointer in the zval's ptr_val
+    z->value.ptr_val = (long long)arr;
+}
+
+void php_array_append(zval* arr, zval* elem) {
+    if (arr->type != PHP_TYPE_ARRAY) return;
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) return;
+
+    // Resize if needed
+    if (array->size >= array->capacity) {
+        int new_capacity = array->capacity * 2;
+        zval* new_elements = (zval*)realloc(array->elements, sizeof(zval) * new_capacity);
+        if (!new_elements) return;
+        array->elements = new_elements;
+        array->capacity = new_capacity;
+    }
+
+    // Copy the element
+    array->elements[array->size] = *elem;
+    array->size++;
+}
+
+void php_array_get(zval* result, zval* arr, zval* index) {
+    // Default to null if anything goes wrong
+    php_zval_null(result);
+
+    if (arr->type != PHP_TYPE_ARRAY) return;
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) return;
+
+    int idx = php_zval_to_int(index);
+    if (idx < 0 || idx >= array->size) return;
+
+    *result = array->elements[idx];
+}

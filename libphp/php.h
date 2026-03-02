@@ -16,16 +16,21 @@ typedef enum {
     PHP_TYPE_NULL,
     PHP_TYPE_BOOL,
     PHP_TYPE_INT,
-    PHP_TYPE_STRING
+    PHP_TYPE_STRING,
+    PHP_TYPE_ARRAY
 } php_type_t;
+
+// Forward declaration for array
+typedef struct php_array php_array;
 
 // Zval struct representing a dynamically typed value
 typedef struct {
     php_type_t type;
     union {
-        int bool_val;      // for PHP_TYPE_BOOL
-        int int_val;       // for PHP_TYPE_INT
-        char* str_val;     // for PHP_TYPE_STRING (null-terminated)
+        int bool_val;           // for PHP_TYPE_BOOL
+        int int_val;            // for PHP_TYPE_INT
+        char* str_val;          // for PHP_TYPE_STRING (null-terminated)
+        long long ptr_val;      // for PHP_TYPE_ARRAY (stores array pointer)
     } value;
 } zval;
 
@@ -93,6 +98,31 @@ char* php_itoa(int num);
  * @return Pointer to static string buffer containing the concatenated result
  */
 char* php_concat_strings(const char* str1, const char* str2);
+
+/**
+ * Creates an array zval with initial capacity.
+ *
+ * @param z The zval to initialize as an array
+ * @param initial_capacity Initial capacity for the array
+ */
+void php_array_create(zval* z, int initial_capacity);
+
+/**
+ * Appends an element to an array.
+ *
+ * @param arr The array zval
+ * @param elem The element to append
+ */
+void php_array_append(zval* arr, zval* elem);
+
+/**
+ * Gets an element from an array by index.
+ *
+ * @param result The zval to store the result in
+ * @param arr The array zval
+ * @param index The index zval (should be an integer)
+ */
+void php_array_get(zval* result, zval* arr, zval* index);
 
 #ifdef __cplusplus
 }

@@ -19,6 +19,8 @@ use PhpCompiler\AST\IfStatement;
 use PhpCompiler\AST\ForStatement;
 use PhpCompiler\AST\WhileStatement;
 use PhpCompiler\AST\DoWhileStatement;
+use PhpCompiler\AST\ArrayLiteral;
+use PhpCompiler\AST\ArrayAccess;
 
 class Parser
 {
@@ -559,7 +561,14 @@ class Parser
             return StringLiteral::fromQuotedString($token->value, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE) {
             $this->consumeToken();
-            $variable = new VariableReference(ltrim($token->value, '$'), $token->line, $token->column);
+            $expression = new VariableReference(ltrim($token->value, '$'), $token->line, $token->column);
+            // Handle array access: $var[expr]
+            while ($this->currentToken() && $this->currentToken()->type === TokenType::T_LBRACKET) {
+                $this->consumeToken(); // consume [
+                $index = $this->parseExpression();
+                $this->consumeTokenOfType(TokenType::T_RBRACKET);
+                $expression = new ArrayAccess($expression, $index, $token->line, $token->column);
+            }
             // Handle postfix increment/decrement
             if ($this->currentToken() && in_array($this->currentToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
                 $operatorToken = $this->consumeToken();
@@ -567,12 +576,15 @@ class Parser
                 // For now, treat as expression
                 // We'll need to add support for these in BinaryOperation and Generator later
                 // but for now, let's just return the variable since we don't handle it yet
-                return $variable;
+                return $expression;
             }
-            return $variable;
+            return $expression;
         } elseif ($token->type === TokenType::T_INTEGER) {
             $this->consumeToken();
             return new IntegerLiteral((int)$token->value, $token->line, $token->column);
+        } elseif ($token->type === TokenType::T_LBRACKET) {
+            // Array literal [elem1, elem2, ...]
+            return $this->parseArrayLiteral();
         }
 
         throw new \RuntimeException(
@@ -583,6 +595,30 @@ class Parser
                 $token->column
             )
         );
+    }
+
+    private function parseArrayLiteral(): ArrayLiteral
+    {
+        $token = $this->consumeToken(); // Consume [
+        $elements = [];
+
+        // Parse elements until we hit ]
+        if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACKET) {
+            // Parse first element
+            $elements[] = $this->parseExpression();
+
+            // Parse additional elements separated by commas
+            while ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
+                $this->consumeToken(); // Consume comma
+                if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACKET) {
+                    $elements[] = $this->parseExpression();
+                }
+            }
+        }
+
+        $this->consumeTokenOfType(TokenType::T_RBRACKET);
+
+        return new ArrayLiteral($elements, $token->line, $token->column);
     }
 
     private function consumeTokenOfType(TokenType $type): Token

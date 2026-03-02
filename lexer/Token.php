@@ -49,6 +49,8 @@ enum TokenType: int
     case T_COMMENT = 41;
     case T_WHILE = 42;
     case T_DO = 43;
+    case T_LBRACKET = 44;
+    case T_RBRACKET = 45;
 }
 
 class Token

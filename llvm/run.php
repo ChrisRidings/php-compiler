@@ -22,6 +22,8 @@ require_once __DIR__ . '/../ast/IfStatement.php';
 require_once __DIR__ . '/../ast/ForStatement.php';
 require_once __DIR__ . '/../ast/WhileStatement.php';
 require_once __DIR__ . '/../ast/DoWhileStatement.php';
+require_once __DIR__ . '/../ast/ArrayLiteral.php';
+require_once __DIR__ . '/../ast/ArrayAccess.php';
 require_once __DIR__ . '/../ast/Parser.php';
 require_once __DIR__ . '/Generator.php';
 
