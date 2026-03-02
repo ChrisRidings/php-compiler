@@ -220,6 +220,15 @@ void php_natsort(zval* arr, zval* result);
 void php_print_r(zval* value, zval* result);
 
 /**
+ * Repeats a string a specified number of times.
+ *
+ * @param str The string to repeat
+ * @param count The number of times to repeat
+ * @param result The result zval (will contain the repeated string)
+ */
+void php_str_repeat(zval* str, zval* count, zval* result);
+
+/**
  * Strict inequality comparison (!==).
  * Returns true if values are not identical (different types or different values).
  *

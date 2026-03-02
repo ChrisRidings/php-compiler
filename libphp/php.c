@@ -670,6 +670,44 @@ void php_print_r(zval* value, zval* result) {
     php_zval_bool(result, 1);  // return true
 }
 
+// str_repeat implementation
+void php_str_repeat(zval* str, zval* count, zval* result) {
+    if (str->type != PHP_TYPE_STRING || str->value.str_val == NULL) {
+        php_zval_string(result, "");
+        return;
+    }
+
+    int repeat_count = php_zval_to_int(count);
+    if (repeat_count <= 0) {
+        php_zval_string(result, "");
+        return;
+    }
+
+    const char* input = str->value.str_val;
+    size_t input_len = strlen(input);
+
+    // Limit to reasonable size to prevent memory issues
+    if (repeat_count > 10000 || input_len * repeat_count > 1000000) {
+        php_zval_string(result, "");
+        return;
+    }
+
+    size_t result_len = input_len * repeat_count;
+    char* output = (char*)malloc(result_len + 1);
+    if (!output) {
+        php_zval_string(result, "");
+        return;
+    }
+
+    output[0] = '\0';
+    for (int i = 0; i < repeat_count; i++) {
+        strcat(output, input);
+    }
+
+    php_zval_string(result, output);
+    free(output);
+}
+
 // Strict inequality comparison (!==)
 void php_zval_strict_ne(zval* a, zval* b, zval* result) {
     // If types are different, they are not identical

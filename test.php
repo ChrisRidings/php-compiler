@@ -22,4 +22,9 @@ if ($dirHandle) {
     natsort($testFiles);
     $testFiles = array_values($testFiles);
 }
-print_r($testFiles);
+
+$passCount = 0;
+$failCount = 0;
+
+echo "Running PHP to LLVM tests...\n";
+echo str_repeat('-', 70) . "\n";

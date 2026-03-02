@@ -103,6 +103,7 @@ class Generator
         $ir[] = "declare void @php_print_r(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_zval_strict_ne(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_zval_strict_eq(%struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_str_repeat(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -553,6 +554,9 @@ class Generator
         } elseif ($funcCall->name === 'print_r') {
             $this->generatePrintRFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'str_repeat') {
+            $this->generateStrRepeatFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -718,6 +722,27 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateStrRepeatFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("str_repeat() expects exactly 2 arguments");
+        }
+
+        // Generate the string argument
+        $strPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the count argument
+        $countPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_str_repeat function
+        $ir[] = "  call void @php_str_repeat(%struct.zval* {$strPtr}, %struct.zval* {$countPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
     private function generateArrayValuesExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -816,6 +841,20 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateStrRepeatExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("str_repeat() expects exactly 2 arguments");
+        }
+
+        $strPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $countPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_str_repeat(%struct.zval* {$strPtr}, %struct.zval* {$countPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
     private function generateCountExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -876,6 +915,8 @@ class Generator
                 return $this->generateNatsortExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'print_r') {
                 return $this->generatePrintRExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'str_repeat') {
+                return $this->generateStrRepeatExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval
