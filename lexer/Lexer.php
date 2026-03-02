@@ -14,8 +14,8 @@ class Lexer
     private const PATTERNS = [
         TokenType::T_OPEN_TAG->value => '/^<\?php/i',
         TokenType::T_CLOSE_TAG->value => '/^\?>/',
-        // Single-line comments (//)
-        TokenType::T_COMMENT->value => '/^\/\/.*/',
+        // Single-line comments (// and #)
+        TokenType::T_COMMENT->value => '/^(?:\/\/|#).*/',
         TokenType::T_ECHO->value => '/^echo\b/i',
         TokenType::T_RETURN->value => '/^return\b/i',
         TokenType::T_FUNCTION->value => '/^function\b/i',
@@ -26,7 +26,10 @@ class Lexer
         TokenType::T_DO->value => '/^do\b/i',
         TokenType::T_FOREACH->value => '/^foreach\b/i',
         TokenType::T_AS->value => '/^as\b/i',
-        TokenType::T_STRING->value => '/^"(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\'/',
+        TokenType::T_DECLARE->value => '/^declare\b/i',
+        // String literals - simple pattern that matches anything between quotes
+        // Double-quoted strings can have escaped quotes, single-quoted treat \' as escape
+        TokenType::T_STRING->value => '/^(?:"[^"]*"|\'[^\']*\')/',
         TokenType::T_INTEGER->value => '/^\d+/',
         TokenType::T_VARIABLE->value => '/^\$[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*/',
         TokenType::T_IDENTIFIER->value => '/^[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*/',

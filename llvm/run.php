@@ -26,6 +26,7 @@ require_once __DIR__ . '/../ast/ArrayLiteral.php';
 require_once __DIR__ . '/../ast/ArrayAccess.php';
 require_once __DIR__ . '/../ast/ArrayAssignment.php';
 require_once __DIR__ . '/../ast/ForeachStatement.php';
+require_once __DIR__ . '/../ast/DeclareStatement.php';
 require_once __DIR__ . '/../ast/Parser.php';
 require_once __DIR__ . '/Generator.php';
 

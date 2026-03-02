@@ -54,6 +54,7 @@ enum TokenType: int
     case T_DOUBLE_ARROW = 46;
     case T_FOREACH = 47;
     case T_AS = 48;
+    case T_DECLARE = 49;
 }
 
 class Token

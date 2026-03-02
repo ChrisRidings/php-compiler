@@ -25,6 +25,7 @@ use PhpCompiler\AST\ArrayLiteral;
 use PhpCompiler\AST\ArrayAccess;
 use PhpCompiler\AST\ArrayAssignment;
 use PhpCompiler\AST\ForeachStatement;
+use PhpCompiler\AST\DeclareStatement;
 
 class Generator
 {
@@ -282,6 +283,9 @@ class Generator
             $this->generateDoWhileStatement($statement, $ir, $globalVars);
         } elseif ($statement instanceof ForeachStatement) {
             $this->generateForeachStatement($statement, $ir, $globalVars);
+        } elseif ($statement instanceof DeclareStatement) {
+            // Declare statement is a PHP runtime directive - no code generation needed
+            // It's treated as a no-op since it affects PHP's runtime behavior, not compiled code
         } else {
             throw new \RuntimeException(
                 sprintf(

@@ -115,6 +115,9 @@ class Parser
         } elseif ($token->type === TokenType::T_FOREACH) {
             // Foreach statement
             return $this->parseForeachStatement();
+        } elseif ($token->type === TokenType::T_DECLARE) {
+            // Declare statement - PHP runtime directive, treat as no-op
+            return $this->parseDeclareStatement();
         }
 
         // Provide better error information
@@ -485,6 +488,27 @@ class Parser
         $this->consumeTokenOfType(TokenType::T_SEMICOLON);
 
         return new DoWhileStatement($body, $condition, $doToken->line, $doToken->column);
+    }
+
+    private function parseDeclareStatement(): DeclareStatement
+    {
+        $declareToken = $this->consumeToken(); // Consume 'declare'
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        $directives = [];
+
+        // Parse directive name (identifier)
+        $nameToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
+        $this->consumeTokenOfType(TokenType::T_ASSIGN);
+
+        // Parse directive value (integer)
+        $valueToken = $this->consumeTokenOfType(TokenType::T_INTEGER);
+        $directives[$nameToken->value] = (int)$valueToken->value;
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+        $this->consumeTokenOfType(TokenType::T_SEMICOLON);
+
+        return new DeclareStatement($directives, $declareToken->line, $declareToken->column);
     }
 
     private function parseForeachStatement(): ForeachStatement
