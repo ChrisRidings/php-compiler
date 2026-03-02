@@ -101,8 +101,8 @@ foreach ($testFiles as $testFile) {
         }
     }
 
-    // Cleanup (but keep exe for debugging)
-    $filesToClean = [$llvmIrPath, $llvmBcPath, $objectPath];
+    // Cleanup
+    $filesToClean = [$llvmIrPath, $llvmBcPath, $objectPath, $exePath];
     foreach ($filesToClean as $file) {
         if (file_exists($file)) {
             unlink($file);
