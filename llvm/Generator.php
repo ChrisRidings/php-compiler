@@ -843,11 +843,35 @@ class Generator
 
         // If key variable is present, populate it
         if ($keyVarName !== null) {
-            // Get the key - for now, just use the numeric index as string
-            // In a full implementation, we'd check if the element has a string key
-            $keyStr = $this->getNextTempVariable();
-            $ir[] = "  {$keyStr} = call i8* @php_itoa(i32 {$currentIndex})";
-            $ir[] = "  call void @php_zval_string(%struct.zval* %{$keyVarName}, i8* {$keyStr})";
+            // Get the key from the array element
+            $rawKeyPtr = $this->getNextTempVariable();
+            $ir[] = "  {$rawKeyPtr} = call i8* @php_array_get_key(%struct.zval* {$arrayPtr}, i32 {$currentIndex})";
+
+            // Check if key is NULL (numeric index) or a string
+            $isNull = $this->getNextTempVariable();
+            $ir[] = "  {$isNull} = icmp eq i8* {$rawKeyPtr}, null";
+
+            // Create labels for conditional
+            $keyIsNullBlock = "foreach_key_null_" . $blockCounter;
+            $keyIsStringBlock = "foreach_key_str_" . $blockCounter;
+            $keyDoneBlock = "foreach_key_done_" . $blockCounter;
+
+            $ir[] = "  br i1 {$isNull}, label %{$keyIsNullBlock}, label %{$keyIsStringBlock}";
+
+            // Key is null - use numeric index as string
+            $ir[] = "{$keyIsNullBlock}:";
+            $indexKeyStr = $this->getNextTempVariable();
+            $ir[] = "  {$indexKeyStr} = call i8* @php_itoa(i32 {$currentIndex})";
+            $ir[] = "  call void @php_zval_string(%struct.zval* %{$keyVarName}, i8* {$indexKeyStr})";
+            $ir[] = "  br label %{$keyDoneBlock}";
+
+            // Key is a string - use it directly
+            $ir[] = "{$keyIsStringBlock}:";
+            $ir[] = "  call void @php_zval_string(%struct.zval* %{$keyVarName}, i8* {$rawKeyPtr})";
+            $ir[] = "  br label %{$keyDoneBlock}";
+
+            // Done
+            $ir[] = "{$keyDoneBlock}:";
         }
 
         // Generate body statements
