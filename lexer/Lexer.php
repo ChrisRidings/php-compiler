@@ -14,8 +14,10 @@ class Lexer
     private const PATTERNS = [
         TokenType::T_OPEN_TAG->value => '/^<\?php/i',
         TokenType::T_ECHO->value => '/^echo\b/i',
+        TokenType::T_RETURN->value => '/^return\b/i',
         TokenType::T_FUNCTION->value => '/^function\b/i',
         TokenType::T_STRING->value => '/^"(?:\\.|[^"\\\\])*"|\'(?:\\.|[^\'\\\\])*\'/',
+        TokenType::T_INTEGER->value => '/^\d+/',
         TokenType::T_VARIABLE->value => '/^\$[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*/',
         TokenType::T_IDENTIFIER->value => '/^[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*/',
         TokenType::T_LPAREN->value => '/^\(/',

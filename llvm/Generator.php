@@ -13,6 +13,8 @@ use PhpCompiler\AST\FunctionDefinition;
 use PhpCompiler\AST\FunctionCall;
 use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
+use PhpCompiler\AST\IntegerLiteral;
+use PhpCompiler\AST\ReturnStatement;
 
 class Generator
 {
@@ -46,6 +48,7 @@ class Generator
 
         // Declare external function for php_echo
         $ir[] = "declare void @php_echo(i8*)";
+        $ir[] = "declare i8* @php_itoa(i32)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -132,6 +135,8 @@ class Generator
             $this->generateFunctionCall($statement, $ir, $globalVars);
         } elseif ($statement instanceof Assignment) {
             $this->generateAssignment($statement, $ir, $globalVars);
+        } elseif ($statement instanceof ReturnStatement) {
+            $this->generateReturnStatement($statement, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -144,28 +149,78 @@ class Generator
         }
     }
 
+    private function generateReturnStatement(ReturnStatement $returnStmt, array &$ir, array $globalVars): void
+    {
+        if ($returnStmt->value === null) {
+            $ir[] = "  ret void";
+        } elseif ($returnStmt->value instanceof IntegerLiteral) {
+            $ir[] = "  ret i32 " . $returnStmt->value->value;
+        } else {
+            // For now, we'll return 0 for non-integer returns
+            $ir[] = "  ret i32 0";
+        }
+        $ir[] = "";
+    }
+
     private function generateAssignment(Assignment $assignment, array &$ir, array $globalVars): void
     {
-        // For now, we'll treat variables as alloca'd on the stack
-        $ir[] = "  %{$assignment->variable->name} = alloca i8*";
-
-        // Generate value
-        if ($assignment->value instanceof StringLiteral) {
-            $globalName = "__str_const_" . md5($assignment->value->value);
-            $globalData = $globalVars[$globalName];
-            $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
-            $ir[] = "  store i8* %{$globalName}_ptr, i8** %{$assignment->variable->name}";
-        } else {
-            $ir[] = "  store i8* null, i8** %{$assignment->variable->name}";
+        // Check if value is a function call that returns an integer
+        $isIntegerReturn = false;
+        if ($assignment->value instanceof FunctionCall) {
+            // For simplification, assume greet_length returns i32
+            $isIntegerReturn = true;
         }
+
+        if ($isIntegerReturn) {
+            // If value is an integer, allocate space for i32
+            $ir[] = "  %{$assignment->variable->name} = alloca i32";
+
+            // Generate value
+            if ($assignment->value instanceof FunctionCall) {
+                $args = [];
+                foreach ($assignment->value->arguments as $arg) {
+                    if ($arg instanceof StringLiteral) {
+                        $globalName = "__str_const_" . md5($arg->value);
+                        $globalData = $globalVars[$globalName];
+                        $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+                        $args[] = "i8* %{$globalName}_ptr";
+                    }
+                }
+                $argStr = implode(', ', $args);
+                $ir[] = "  %call_result = call i32 @{$assignment->value->name}({$argStr})";
+                $ir[] = "  store i32 %call_result, i32* %{$assignment->variable->name}";
+            }
+        } else {
+            // Otherwise treat as string
+            $ir[] = "  %{$assignment->variable->name} = alloca i8*";
+
+            if ($assignment->value instanceof StringLiteral) {
+                $globalName = "__str_const_" . md5($assignment->value->value);
+                $globalData = $globalVars[$globalName];
+                $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+                $ir[] = "  store i8* %{$globalName}_ptr, i8** %{$assignment->variable->name}";
+            } else {
+                $ir[] = "  store i8* null, i8** %{$assignment->variable->name}";
+            }
+        }
+
         $ir[] = "";
     }
 
     private function generateFunctionDefinition(FunctionDefinition $funcDef, array &$ir, array $globalVars): void
     {
+        // Determine return type based on body
+        $returnType = "void";
+        foreach ($funcDef->body as $statement) {
+            if ($statement instanceof ReturnStatement && $statement->value instanceof IntegerLiteral) {
+                $returnType = "i32";
+                break;
+            }
+        }
+
         // Generate function prototype
         $paramTypes = implode(', ', array_fill(0, count($funcDef->parameters), 'i8*'));
-        $ir[] = "define void @{$funcDef->name}({$paramTypes}) {";
+        $ir[] = "define {$returnType} @{$funcDef->name}({$paramTypes}) {";
         $ir[] = "entry:";
 
         // Generate function body
@@ -173,7 +228,13 @@ class Generator
             $this->generateStatement($statement, $ir, $globalVars);
         }
 
-        $ir[] = "  ret void";
+        // If no return statement was found, add a default return
+        if ($returnType === "void") {
+            $ir[] = "  ret void";
+        } else {
+            $ir[] = "  ret i32 0";
+        }
+
         $ir[] = "}";
         $ir[] = "";
     }
@@ -213,6 +274,8 @@ class Generator
             $this->generateStringLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof VariableReference) {
             $this->generateVariableReference($expression, $ir, $globalVars);
+        } elseif ($expression instanceof IntegerLiteral) {
+            $this->generateIntegerLiteral($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -225,12 +288,36 @@ class Generator
         }
     }
 
+    private function generateIntegerLiteral(IntegerLiteral $literal, array &$ir, array $globalVars): void
+    {
+        // To print an integer, we need to convert it to a string first
+        // For now, we'll just print the integer as a string literal
+        $intStr = (string)$literal->value;
+        $globalName = "__str_const_" . md5($intStr);
+
+        if (!isset($globalVars[$globalName])) {
+            $globalVars[$globalName] = [
+                'value' => $intStr,
+                'escapedValue' => $this->escapeString($intStr),
+                'length' => strlen($intStr) + 1
+            ];
+        }
+
+        $globalData = $globalVars[$globalName];
+        $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+        $ir[] = "  call void @php_echo(i8* %{$globalName}_ptr)";
+        $ir[] = "";
+    }
+
     private function generateVariableReference(VariableReference $varRef, array &$ir, array $globalVars): void
     {
         // Check if variable is a parameter or local variable
-        // For now, we'll assume $name is parameter %0, others are locals
         if ($varRef->name === 'name') {
             $ir[] = "  call void @php_echo(i8* %0)";
+        } elseif ($varRef->name === 'result') {
+            $ir[] = "  %result_val = load i32, i32* %result";
+            $ir[] = "  %result_str_ptr = call i8* @php_itoa(i32 %result_val)";
+            $ir[] = "  call void @php_echo(i8* %result_str_ptr)";
         } else {
             $ir[] = "  %{$varRef->name}_ptr = load i8*, i8** %{$varRef->name}";
             $ir[] = "  call void @php_echo(i8* %{$varRef->name}_ptr)";

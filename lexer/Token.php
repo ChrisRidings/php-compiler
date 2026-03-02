@@ -22,6 +22,8 @@ enum TokenType: int
     case T_VARIABLE = 14;
     case T_DOLLAR = 15;
     case T_ASSIGN = 16;
+    case T_INTEGER = 17;
+    case T_RETURN = 18;
 }
 
 class Token

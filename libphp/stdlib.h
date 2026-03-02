@@ -15,6 +15,14 @@ extern "C" {
  */
 void php_echo(const char* str);
 
+/**
+ * Converts an integer to a string.
+ *
+ * @param num The integer to convert
+ * @return Pointer to static string buffer (thread-safe, but overwrites on each call)
+ */
+char* php_itoa(int num);
+
 #ifdef __cplusplus
 }
 #endif

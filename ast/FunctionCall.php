@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace PhpCompiler\AST;
 
-class FunctionCall extends Statement
+class FunctionCall extends Expression
 {
     /**
      * @var Expression[]

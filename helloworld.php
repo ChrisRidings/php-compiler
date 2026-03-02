@@ -1,9 +1,11 @@
 <?php
-function greet($name) {
-    $greeting = "Yo there, ";
+function greet_length($name) {
+    $greeting = "Hello, ";
     echo $greeting;
     echo $name;
     echo "!";
+    return 5;
 }
 
-greet("Alice");
+$result = greet_length("Alice");
+echo $result;

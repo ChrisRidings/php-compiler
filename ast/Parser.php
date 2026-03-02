@@ -12,6 +12,8 @@ use PhpCompiler\AST\FunctionCall;
 use PhpCompiler\AST\Parameter;
 use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
+use PhpCompiler\AST\IntegerLiteral;
+use PhpCompiler\AST\ReturnStatement;
 
 class Parser
 {
@@ -66,10 +68,14 @@ class Parser
             if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
                 $this->consumeToken();
             }
-            return $call; // We'll treat function calls as statements for now
+            // Create a dummy statement to wrap the expression
+            return new ReturnStatement($call, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_ASSIGN) {
             // Assignment statement
             return $this->parseAssignment();
+        } elseif ($token->type === TokenType::T_RETURN) {
+            // Return statement
+            return $this->parseReturnStatement();
         }
 
         // Provide better error information
@@ -163,6 +169,22 @@ class Parser
         );
     }
 
+    private function parseReturnStatement(): ReturnStatement
+    {
+        $returnToken = $this->consumeToken();
+        $value = null;
+
+        if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
+            $value = $this->parseExpression();
+        }
+
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+            $this->consumeToken();
+        }
+
+        return new ReturnStatement($value, $returnToken->line, $returnToken->column);
+    }
+
     private function parseAssignment(): Assignment
     {
         $varToken = $this->consumeToken();
@@ -235,12 +257,18 @@ class Parser
             throw new \RuntimeException("Unexpected end of input when parsing expression");
         }
 
-        if ($token->type === TokenType::T_STRING) {
+        if ($token->type === TokenType::T_IDENTIFIER && $this->peekToken() && $this->peekToken()->type === TokenType::T_LPAREN) {
+            // Function call as expression
+            return $this->parseFunctionCall();
+        } elseif ($token->type === TokenType::T_STRING) {
             $this->consumeToken();
             return StringLiteral::fromQuotedString($token->value, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE) {
             $this->consumeToken();
             return new VariableReference(ltrim($token->value, '$'), $token->line, $token->column);
+        } elseif ($token->type === TokenType::T_INTEGER) {
+            $this->consumeToken();
+            return new IntegerLiteral((int)$token->value, $token->line, $token->column);
         }
 
         throw new \RuntimeException(
