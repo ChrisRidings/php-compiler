@@ -100,13 +100,36 @@ class Generator
             $this->generateStatement($funcDef, $ir, $globalVars);
         }
 
-        // Define main function
+         // Define main function
         $ir[] = "define i32 @main() {";
         $ir[] = "entry:";
 
-        // Generate code for other statements (should be function calls)
+        // Generate code for other statements
         foreach ($otherStatements as $statement) {
-            $this->generateStatement($statement, $ir, $globalVars);
+            if ($statement instanceof FunctionCall) {
+                // Call function and discard result
+                $args = [];
+                foreach ($statement->arguments as $arg) {
+                    $argPtr = $this->generateExpression($arg, $ir, $globalVars);
+                    $argVal = $this->getNextTempVariable();
+                    $ir[] = "  {$argVal} = load %struct.zval, %struct.zval* {$argPtr}";
+                    $args[] = "%struct.zval {$argVal}";
+                }
+                $argStr = implode(', ', $args);
+                $ir[] = "  %call_result = call %struct.zval @{$statement->name}({$argStr})";
+                // Discard the result - store in stack space and then do nothing
+                $ir[] = "  %result_ptr = alloca %struct.zval";
+                $ir[] = "  store %struct.zval %call_result, %struct.zval* %result_ptr";
+            } elseif ($statement instanceof ReturnStatement) {
+                // If it's a return statement at top level, we need to handle it specially
+                // because main must return i32, not zval
+                if ($statement->value !== null) {
+                    // Generate the expression and then ignore it (we'll return 0 anyway)
+                    $this->generateExpression($statement->value, $ir, $globalVars);
+                }
+            } else {
+                $this->generateStatement($statement, $ir, $globalVars);
+            }
         }
 
         // Return 0 from main
@@ -133,6 +156,10 @@ class Generator
             }
         } elseif ($node instanceof Assignment) {
             $this->collectGlobals($node->value, $globalVars);
+        } elseif ($node instanceof ReturnStatement) {
+            if ($node->value !== null) {
+                $this->collectGlobals($node->value, $globalVars);
+            }
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
@@ -141,6 +168,14 @@ class Generator
                     'escapedValue' => $this->escapeString($node->value),
                     'length' => strlen($node->value) + 1 // +1 for null terminator
                 ];
+            }
+        }
+        // Handle all other statement types to ensure arguments are collected
+        if ($node instanceof Statement) {
+            if ($node instanceof FunctionCall) {
+                foreach ($node->arguments as $arg) {
+                    $this->collectGlobals($arg, $globalVars);
+                }
             }
         }
     }
@@ -171,14 +206,21 @@ class Generator
 
     private function generateReturnStatement(ReturnStatement $returnStmt, array &$ir, array $globalVars): void
     {
+        // Always return a zval
         if ($returnStmt->value === null) {
             $nullResult = $this->getNextTempVariable();
-            $ir[] = "  {$nullResult} = call %struct.zval @php_zval_null()";
-            $ir[] = "  ret %struct.zval {$nullResult}";
+            $ir[] = "  {$nullResult} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_null(%struct.zval* {$nullResult})";
+            $loaded = $this->getNextTempVariable();
+            $ir[] = "  {$loaded} = load %struct.zval, %struct.zval* {$nullResult}";
+            $ir[] = "  ret %struct.zval {$loaded}";
         } else {
-            $result = $this->generateExpression($returnStmt->value, $ir, $globalVars);
-            $ir[] = "  ret %struct.zval {$result}";
+            $resultPtr = $this->generateExpression($returnStmt->value, $ir, $globalVars);
+            $resultVal = $this->getNextTempVariable();
+            $ir[] = "  {$resultVal} = load %struct.zval, %struct.zval* {$resultPtr}";
+            $ir[] = "  ret %struct.zval {$resultVal}";
         }
+
         $ir[] = "";
     }
 
@@ -226,8 +268,11 @@ class Generator
 
         if (!$hasReturn) {
             $nullResult = $this->getNextTempVariable();
-            $ir[] = "  {$nullResult} = call %struct.zval @php_zval_null()";
-            $ir[] = "  ret %struct.zval {$nullResult}";
+            $ir[] = "  {$nullResult} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_null(%struct.zval* {$nullResult})";
+            $loaded = $this->getNextTempVariable();
+            $ir[] = "  {$loaded} = load %struct.zval, %struct.zval* {$nullResult}";
+            $ir[] = "  ret %struct.zval {$loaded}";
         }
 
         $ir[] = "}";
@@ -239,20 +284,14 @@ class Generator
         // Generate arguments
         $args = [];
         foreach ($funcCall->arguments as $arg) {
-            // For now, we'll handle string literals directly
-            if ($arg instanceof StringLiteral) {
-                $globalName = "__str_const_" . md5($arg->value);
-                $globalData = $globalVars[$globalName];
-                $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
-                $args[] = "i8* %{$globalName}_ptr";
-            } else {
-                // For other types, we'll just pass null for now
-                $args[] = "i8* null";
-            }
+            $argPtr = $this->generateExpression($arg, $ir, $globalVars);
+            $argVal = $this->getNextTempVariable();
+            $ir[] = "  {$argVal} = load %struct.zval, %struct.zval* {$argPtr}";
+            $args[] = "%struct.zval {$argVal}";
         }
 
         $argStr = implode(', ', $args);
-        $ir[] = "  call void @{$funcCall->name}({$argStr})";
+        $ir[] = "  call %struct.zval @{$funcCall->name}({$argStr})";
         $ir[] = "";
     }
 
@@ -275,6 +314,24 @@ class Generator
             return $this->generateIntegerLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof BinaryOperation) {
             return $this->generateBinaryOperation($expression, $ir, $globalVars);
+        } elseif ($expression instanceof FunctionCall) {
+            // Function calls as expressions: generate call and return pointer to result zval
+            $result = $this->getNextTempVariable();
+            $ir[] = "  {$result} = alloca %struct.zval";
+
+            $args = [];
+            foreach ($expression->arguments as $arg) {
+                $argPtr = $this->generateExpression($arg, $ir, $globalVars);
+                $argVal = $this->getNextTempVariable();
+                $ir[] = "  {$argVal} = load %struct.zval, %struct.zval* {$argPtr}";
+                $args[] = "%struct.zval {$argVal}";
+            }
+
+            $argStr = implode(', ', $args);
+            $ir[] = "  %call_result = call %struct.zval @{$expression->name}({$argStr})";
+            $ir[] = "  store %struct.zval %call_result, %struct.zval* {$result}";
+
+            return $result;
         } else {
             throw new \RuntimeException(
                 sprintf(

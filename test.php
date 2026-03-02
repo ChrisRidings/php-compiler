@@ -1,6 +1,6 @@
 <?php
+function say_hello() {
+    echo "Hello, world!";
+}
 
-$x = "6";
-$y = 3;
-$z = $x + $y;
-echo $z;
+say_hello();

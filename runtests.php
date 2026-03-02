@@ -86,18 +86,23 @@ foreach ($testFiles as $testFile) {
     $llvmRuntimeOutput = shell_exec('"' . $exePath . '" 2>&1');
 
     // 7. Compare outputs
-    if (trim($phpOutput) === trim($llvmRuntimeOutput)) {
-        echo "  PASSED\n";
-        $passCount++;
-    } else {
-        echo "  FAILED: Output mismatch\n";
-        echo "  PHP Output:\n" . str_replace("\n", "\n    ", trim($phpOutput)) . "\n";
-        echo "  LLVM Output:\n" . str_replace("\n", "\n    ", trim($llvmRuntimeOutput)) . "\n";
+    if ($llvmRuntimeOutput === null) {
+        echo "  FAILED: Could not execute compiled executable\n";
         $failCount++;
+    } else {
+        if (trim($phpOutput) === trim($llvmRuntimeOutput)) {
+            echo "  PASSED\n";
+            $passCount++;
+        } else {
+            echo "  FAILED: Output mismatch\n";
+            echo "  PHP Output:\n" . str_replace("\n", "\n    ", trim($phpOutput)) . "\n";
+            echo "  LLVM Output:\n" . str_replace("\n", "\n    ", trim($llvmRuntimeOutput)) . "\n";
+            $failCount++;
+        }
     }
 
-    // Cleanup
-    $filesToClean = [$llvmIrPath, $llvmBcPath, $objectPath, $exePath];
+    // Cleanup (but keep exe for debugging)
+    $filesToClean = [$llvmIrPath, $llvmBcPath, $objectPath];
     foreach ($filesToClean as $file) {
         if (file_exists($file)) {
             unlink($file);
