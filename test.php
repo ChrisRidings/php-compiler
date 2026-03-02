@@ -42,5 +42,27 @@ foreach ($testFiles as $testFile) {
 
     // 1. Run with PHP
     $phpOutput = shell_exec("$phpPath $testPath 2>&1");
-    echo $phpOutput . "\n";
+
+    // 2. Generate LLVM IR (run.php writes to output.ll)
+    $llvmIrPath = $testDir . '/' . pathinfo($testFile, PATHINFO_FILENAME) . '.ll';
+    $llvmOutput = shell_exec("$phpPath $llvmRunPath $testPath 2>&1");
+    if (file_exists('output.ll')) {
+        rename('output.ll', $llvmIrPath);
+    }
+    if (!file_exists($llvmIrPath)) {
+        echo "  FAILED: Could not generate LLVM IR: $llvmOutput\n";
+        $failCount++;
+        continue;
+    }
+
+    // 3. Assemble to bitcode
+    $llvmBcPath = $testDir . '/' . pathinfo($testFile, PATHINFO_FILENAME) . '.bc';
+    $llvmAsOutput = shell_exec('"' . $llvmAsPath . '" "' . $llvmIrPath . '" -o "' . $llvmBcPath . '" 2>&1');
+    if (!file_exists($llvmBcPath)) {
+        echo "  FAILED: Could not assemble LLVM bitcode: $llvmAsOutput\n";
+        $failCount++;
+        unlink($llvmIrPath);
+        continue;
+    }
+
 }

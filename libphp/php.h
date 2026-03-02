@@ -1,3 +1,4 @@
+
 #ifndef LIBPHP_PHP_H
 #define LIBPHP_PHP_H
 
@@ -243,6 +244,24 @@ void php_file_exists(zval* path, zval* result);
  * @param result The result zval (will contain command output or null on error)
  */
 void php_shell_exec(zval* cmd, zval* result);
+
+/**
+ * Returns information about a file path.
+ *
+ * @param path The file path
+ * @param options Bitmask of which path info parts to return
+ * @param result The result zval (will contain array or specific value)
+ */
+void php_pathinfo(zval* path, zval* options, zval* result);
+
+/**
+ * Renames a file.
+ *
+ * @param oldname The old filename
+ * @param newname The new filename
+ * @param result The result zval (will be true on success, false on failure)
+ */
+void php_rename(zval* oldname, zval* newname, zval* result);
 
 /**
  * Strict inequality comparison (!==).

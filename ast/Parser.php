@@ -27,6 +27,7 @@ use PhpCompiler\AST\ArrayAccess;
 use PhpCompiler\AST\ArrayAssignment;
 use PhpCompiler\AST\ForeachStatement;
 use PhpCompiler\AST\ExpressionStatement;
+use PhpCompiler\AST\Constant;
 
 class Parser
 {
@@ -751,6 +752,10 @@ class Parser
 
         if ($token->type === TokenType::T_IDENTIFIER && $this->peekToken() && $this->peekToken()->type === TokenType::T_LPAREN) {
             return $this->parseFunctionCall();
+        } elseif ($token->type === TokenType::T_IDENTIFIER) {
+            // Could be a constant (all uppercase identifier not followed by parens)
+            $this->consumeToken();
+            return new Constant($token->value, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_STRING) {
             $this->consumeToken();
             // Check if it's a double-quoted string (starts with ")

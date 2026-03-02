@@ -820,6 +820,101 @@ void php_zval_strict_eq(zval* a, zval* b, zval* result) {
     php_zval_bool(result, equal);
 }
 
+// pathinfo implementation - returns an array with path info
+void php_pathinfo(zval* path, zval* options, zval* result) {
+    if (path->type != PHP_TYPE_STRING || path->value.str_val == NULL) {
+        php_zval_null(result);
+        return;
+    }
+
+    const char* filepath = path->value.str_val;
+    int opts = php_zval_to_int(options);
+
+    // Create result array
+    php_array_create(result, 4);
+
+    // Find the last directory separator
+    const char* last_slash = strrchr(filepath, '/');
+    const char* last_backslash = strrchr(filepath, '\\');
+    const char* basename_start = filepath;
+
+    if (last_slash != NULL || last_backslash != NULL) {
+        const char* last_sep = last_slash;
+        if (last_backslash > last_sep) {
+            last_sep = last_backslash;
+        }
+        if (last_sep != NULL) {
+            // Extract dirname
+            if (opts == 0 || opts & 1) {  // PATHINFO_DIRNAME = 1
+                int dirname_len = last_sep - filepath;
+                char* dirname = (char*)malloc(dirname_len + 1);
+                strncpy(dirname, filepath, dirname_len);
+                dirname[dirname_len] = '\0';
+
+                zval dirname_zval;
+                php_zval_string(&dirname_zval, dirname);
+                free(dirname);
+
+                zval key_zval;
+                php_zval_string(&key_zval, "dirname");
+                php_array_set(result, "dirname", &dirname_zval);
+            }
+            basename_start = last_sep + 1;
+        }
+    } else if (opts == 0 || opts & 1) {
+        // No directory separator, dirname is "."
+        zval dirname_zval;
+        php_zval_string(&dirname_zval, ".");
+        php_array_set(result, "dirname", &dirname_zval);
+    }
+
+    // Extract basename
+    const char* ext_start = strrchr(basename_start, '.');
+    size_t basename_len = strlen(basename_start);
+
+    if (ext_start != NULL) {
+        basename_len = ext_start - basename_start;
+    }
+
+    char* basename = (char*)malloc(basename_len + 1);
+    strncpy(basename, basename_start, basename_len);
+    basename[basename_len] = '\0';
+
+    if (opts == 0 || opts & 8) {  // PATHINFO_FILENAME = 8
+        zval filename_zval;
+        php_zval_string(&filename_zval, basename);
+        php_array_set(result, "filename", &filename_zval);
+    }
+
+    free(basename);
+
+    // If specific option was requested, extract just that value
+    if (opts == 8) {  // PATHINFO_FILENAME only
+        // Get the filename from the array
+        zval index_zval;
+        php_zval_string(&index_zval, "filename");
+        php_array_get(result, result, &index_zval);
+        return;
+    }
+}
+
+// rename implementation - renames a file
+void php_rename(zval* oldname, zval* newname, zval* result) {
+    if (oldname->type != PHP_TYPE_STRING || oldname->value.str_val == NULL ||
+        newname->type != PHP_TYPE_STRING || newname->value.str_val == NULL) {
+        php_zval_bool(result, 0);  // false
+        return;
+    }
+
+    #ifdef _WIN32
+    int success = MoveFile(oldname->value.str_val, newname->value.str_val);
+    #else
+    int success = (rename(oldname->value.str_val, newname->value.str_val) == 0);
+    #endif
+
+    php_zval_bool(result, success ? 1 : 0);
+}
+
 // shell_exec implementation - Windows compatible
 void php_shell_exec(zval* cmd, zval* result) {
     if (cmd->type != PHP_TYPE_STRING || cmd->value.str_val == NULL) {

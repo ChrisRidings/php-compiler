@@ -30,6 +30,7 @@ use PhpCompiler\AST\ArrayAssignment;
 use PhpCompiler\AST\ForeachStatement;
 use PhpCompiler\AST\DeclareStatement;
 use PhpCompiler\AST\ExpressionStatement;
+use PhpCompiler\AST\Constant;
 
 class Generator
 {
@@ -114,6 +115,8 @@ class Generator
         $ir[] = "declare void @php_str_repeat(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_file_exists(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_shell_exec(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_pathinfo(%struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_rename(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -580,6 +583,12 @@ class Generator
         } elseif ($funcCall->name === 'shell_exec') {
             $this->generateShellExecFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'pathinfo') {
+            $this->generatePathinfoFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'rename') {
+            $this->generateRenameFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -802,6 +811,54 @@ class Generator
         $ir[] = "";
     }
 
+    private function generatePathinfoFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 1 || count($funcCall->arguments) > 2) {
+            throw new \RuntimeException("pathinfo() expects 1 or 2 arguments");
+        }
+
+        // Generate the path argument
+        $pathPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the options argument (defaults to 0 if not provided)
+        if (count($funcCall->arguments) > 1) {
+            $optionsPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        } else {
+            $optionsPtr = $this->getNextTempVariable();
+            $ir[] = "  {$optionsPtr} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_int(%struct.zval* {$optionsPtr}, i32 0)";
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_pathinfo function
+        $ir[] = "  call void @php_pathinfo(%struct.zval* {$pathPtr}, %struct.zval* {$optionsPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateRenameFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("rename() expects exactly 2 arguments");
+        }
+
+        // Generate the oldname argument
+        $oldnamePtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the newname argument
+        $newnamePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_rename function
+        $ir[] = "  call void @php_rename(%struct.zval* {$oldnamePtr}, %struct.zval* {$newnamePtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
     private function generateArrayValuesExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -940,6 +997,54 @@ class Generator
         return $resultPtr;
     }
 
+    private function generatePathinfoExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 1 || count($funcCall->arguments) > 2) {
+            throw new \RuntimeException("pathinfo() expects 1 or 2 arguments");
+        }
+
+        // Generate the path argument
+        $pathPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the options argument (defaults to 0 if not provided)
+        if (count($funcCall->arguments) > 1) {
+            $optionsPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        } else {
+            $optionsPtr = $this->getNextTempVariable();
+            $ir[] = "  {$optionsPtr} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_int(%struct.zval* {$optionsPtr}, i32 0)";
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_pathinfo function
+        $ir[] = "  call void @php_pathinfo(%struct.zval* {$pathPtr}, %struct.zval* {$optionsPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
+    private function generateRenameExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("rename() expects exactly 2 arguments");
+        }
+
+        // Generate the oldname argument
+        $oldnamePtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the newname argument
+        $newnamePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_rename function
+        $ir[] = "  call void @php_rename(%struct.zval* {$oldnamePtr}, %struct.zval* {$newnamePtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
     private function generateCountExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -980,6 +1085,8 @@ class Generator
             return $this->generateIntegerLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof BooleanLiteral) {
             return $this->generateBooleanLiteral($expression, $ir, $globalVars);
+        } elseif ($expression instanceof Constant) {
+            return $this->generateConstant($expression, $ir, $globalVars);
         } elseif ($expression instanceof UnaryOperation) {
             return $this->generateUnaryOperation($expression, $ir, $globalVars);
         } elseif ($expression instanceof BinaryOperation) {
@@ -1008,6 +1115,10 @@ class Generator
                 return $this->generateFileExistsExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'shell_exec') {
                 return $this->generateShellExecExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'pathinfo') {
+                return $this->generatePathinfoExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'rename') {
+                return $this->generateRenameExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval
@@ -1062,6 +1173,21 @@ class Generator
         $ir[] = "  {$result} = alloca %struct.zval";
         $boolVal = $literal->value ? 1 : 0;
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 {$boolVal})";
+        return $result;
+    }
+
+    private function generateConstant(Constant $constant, array &$ir, array $globalVars): string
+    {
+        // Define known constants
+        $constantValues = [
+            'PATHINFO_FILENAME' => 8,  // PHP's PATHINFO_FILENAME constant value
+        ];
+
+        $value = $constantValues[$constant->name] ?? 0;
+
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 {$value})";
         return $result;
     }
 
