@@ -48,4 +48,11 @@ foreach ($assoc as $key => $val) {
 }
 echo "\n";
 
+// Edge cases
+$empty = [];
+echo "Empty array length: " . count($empty) . "\n";
+$single = [42];
+echo "Single element array: " . $single[0] . "\n";
+
+
 ?>

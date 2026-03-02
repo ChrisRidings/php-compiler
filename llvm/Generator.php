@@ -431,6 +431,12 @@ class Generator
 
     private function generateFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
     {
+        // Handle builtin functions specially
+        if ($funcCall->name === 'count') {
+            $this->generateCountFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        }
+
         // Generate arguments
         $args = [];
         foreach ($funcCall->arguments as $arg) {
@@ -443,6 +449,47 @@ class Generator
         $argStr = implode(', ', $args);
         $ir[] = "  call %struct.zval @{$funcCall->name}({$argStr})";
         $ir[] = "";
+    }
+
+    private function generateCountFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("count() expects exactly 1 argument");
+        }
+
+        // Generate the array argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_array_size to get the count
+        $countResult = $this->getNextTempVariable();
+        $ir[] = "  {$countResult} = call i32 @php_array_size(%struct.zval* {$argPtr})";
+
+        // Store result in a zval (we need to allocate and store, but since this is a statement, we just discard)
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$countResult})";
+        $ir[] = "";
+    }
+
+    private function generateCountExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("count() expects exactly 1 argument");
+        }
+
+        // Generate the array argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_array_size to get the count
+        $countResult = $this->getNextTempVariable();
+        $ir[] = "  {$countResult} = call i32 @php_array_size(%struct.zval* {$argPtr})";
+
+        // Store result in a zval and return pointer
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$countResult})";
+
+        return $resultPtr;
     }
 
     private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void
@@ -465,6 +512,11 @@ class Generator
         } elseif ($expression instanceof BinaryOperation) {
             return $this->generateBinaryOperation($expression, $ir, $globalVars);
         } elseif ($expression instanceof FunctionCall) {
+            // Handle builtin functions specially
+            if ($expression->name === 'count') {
+                return $this->generateCountExpression($expression, $ir, $globalVars);
+            }
+
             // Function calls as expressions: generate call and return pointer to result zval
             $result = $this->getNextTempVariable();
             $ir[] = "  {$result} = alloca %struct.zval";
