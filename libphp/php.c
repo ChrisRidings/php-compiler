@@ -548,7 +548,7 @@ void php_preg_match(zval* pattern, zval* subject, zval* result) {
     }
 }
 
-// Simple natural order comparison (fallback for systems without strverscmp)
+// Natural order comparison - compares strings with numeric parts as numbers
 static int natural_compare(const void* a, const void* b) {
     const php_array_element* ea = (const php_array_element*)a;
     const php_array_element* eb = (const php_array_element*)b;
@@ -556,9 +556,50 @@ static int natural_compare(const void* a, const void* b) {
     char* str_a = php_zval_to_string(&ea->value);
     char* str_b = php_zval_to_string(&eb->value);
 
-    // Simple string comparison (not true natural order, but works for basic cases)
-    // A full implementation would handle numbers specially
-    return strcmp(str_a, str_b);
+    // Natural order comparison: compare strings character by character,
+    // but when we encounter digits, compare the entire numeric value
+    while (*str_a && *str_b) {
+        // Skip leading spaces
+        while (*str_a == ' ') str_a++;
+        while (*str_b == ' ') str_b++;
+
+        if (!*str_a || !*str_b) break;
+
+        // Check if both current positions are digits
+        if (*str_a >= '0' && *str_a <= '9' && *str_b >= '0' && *str_b <= '9') {
+            // Parse the full numbers
+            unsigned long num_a = 0, num_b = 0;
+
+            // Extract number from str_a
+            while (*str_a >= '0' && *str_a <= '9') {
+                num_a = num_a * 10 + (*str_a - '0');
+                str_a++;
+            }
+
+            // Extract number from str_b
+            while (*str_b >= '0' && *str_b <= '9') {
+                num_b = num_b * 10 + (*str_b - '0');
+                str_b++;
+            }
+
+            // Compare the numbers
+            if (num_a != num_b) {
+                return (num_a < num_b) ? -1 : 1;
+            }
+            // Numbers are equal, continue with next part of string
+        } else {
+            // Regular character comparison
+            if (*str_a != *str_b) {
+                return (*str_a < *str_b) ? -1 : 1;
+            }
+            str_a++;
+            str_b++;
+        }
+    }
+
+    // One string is a prefix of the other
+    if (!*str_a && !*str_b) return 0;
+    return *str_a ? 1 : -1;
 }
 
 void php_natsort(zval* arr, zval* result) {
