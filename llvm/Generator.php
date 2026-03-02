@@ -172,11 +172,10 @@ class Generator
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
-                $escapedValue = $this->escapeString($node->value);
-            $globalVars[$globalName] = [
+                $globalVars[$globalName] = [
                 'value' => $node->value,
-                'escapedValue' => $escapedValue,
-                'length' => strlen($escapedValue) + 1 // +1 for null terminator
+                'escapedValue' => $this->escapeString($node->value),
+                'length' => strlen($node->value) + 1 // +1 for null terminator
             ];
             }
         }

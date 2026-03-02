@@ -73,7 +73,54 @@ void php_echo(const char* str) {
         return;
     }
 
-    printf("%s", str);
+    while (*str) {
+        if (*str == '\\') {
+            str++;
+            switch (*str) {
+                case 'n':
+                    putchar('\n');
+                    str++;
+                    break;
+                case 't':
+                    putchar('\t');
+                    str++;
+                    break;
+                case 'r':
+                    putchar('\r');
+                    str++;
+                    break;
+                case 'b':
+                    putchar('\b');
+                    str++;
+                    break;
+                case 'f':
+                    putchar('\f');
+                    str++;
+                    break;
+                case '"':
+                    putchar('"');
+                    str++;
+                    break;
+                case '\'':
+                    putchar('\'');
+                    str++;
+                    break;
+                case '\\':
+                    putchar('\\');
+                    str++;
+                    break;
+                default:
+                    putchar('\\');
+                    // If it's an unrecognized escape sequence, just print it as-is
+                    putchar(*str);
+                    str++;
+                    break;
+            }
+        } else {
+            putchar(*str);
+            str++;
+        }
+    }
 }
 
 char* php_itoa(int num) {
