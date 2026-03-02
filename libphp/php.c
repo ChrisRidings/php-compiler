@@ -274,3 +274,41 @@ void php_array_set(zval* arr, const char* key, zval* value) {
     array->elements[array->size].value = *value;
     array->size++;
 }
+
+void php_array_set_by_index(zval* arr, int index, zval* value) {
+    if (arr->type != PHP_TYPE_ARRAY) return;
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) return;
+
+    // If index is within bounds, update the existing element
+    if (index >= 0 && index < array->size) {
+        array->elements[index].value = *value;
+        return;
+    }
+
+    // If index is beyond current size, we need to grow the array
+    // (This is a simplified implementation - in a full PHP implementation,
+    // we'd need to handle sparse arrays differently)
+    if (index >= array->size) {
+        // Grow the array if needed
+        while (index >= array->capacity) {
+            int new_capacity = array->capacity * 2;
+            php_array_element* new_elements = (php_array_element*)realloc(array->elements, sizeof(php_array_element) * new_capacity);
+            if (!new_elements) return;
+            array->elements = new_elements;
+            array->capacity = new_capacity;
+        }
+
+        // Initialize intermediate elements with null if needed
+        for (int i = array->size; i < index; i++) {
+            array->elements[i].key = NULL;
+            array->elements[i].value.type = PHP_TYPE_NULL;
+        }
+
+        // Set the value at the specified index
+        array->elements[index].key = NULL;
+        array->elements[index].value = *value;
+        array->size = index + 1;
+    }
+}

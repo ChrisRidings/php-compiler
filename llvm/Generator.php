@@ -23,6 +23,7 @@ use PhpCompiler\AST\WhileStatement;
 use PhpCompiler\AST\DoWhileStatement;
 use PhpCompiler\AST\ArrayLiteral;
 use PhpCompiler\AST\ArrayAccess;
+use PhpCompiler\AST\ArrayAssignment;
 
 class Generator
 {
@@ -86,6 +87,7 @@ class Generator
         $ir[] = "declare void @php_array_append(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_array_get(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_array_set(%struct.zval*, i8*, %struct.zval*)";
+        $ir[] = "declare void @php_array_set_by_index(%struct.zval*, i32, %struct.zval*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -173,6 +175,9 @@ class Generator
             }
         } elseif ($node instanceof Assignment) {
             $this->collectGlobals($node->value, $globalVars);
+        } elseif ($node instanceof ArrayAssignment) {
+            $this->collectGlobals($node->arrayAccess, $globalVars);
+            $this->collectGlobals($node->value, $globalVars);
         } elseif ($node instanceof ReturnStatement) {
             if ($node->value !== null) {
                 $this->collectGlobals($node->value, $globalVars);
@@ -255,6 +260,8 @@ class Generator
             $this->generateFunctionCall($statement, $ir, $globalVars);
         } elseif ($statement instanceof Assignment) {
             $this->generateAssignment($statement, $ir, $globalVars);
+        } elseif ($statement instanceof ArrayAssignment) {
+            $this->generateArrayAssignment($statement, $ir, $globalVars);
         } elseif ($statement instanceof ReturnStatement) {
             $this->generateReturnStatement($statement, $ir, $globalVars);
         } elseif ($statement instanceof IfStatement) {
@@ -345,7 +352,26 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateArrayAssignment(ArrayAssignment $arrayAssignment, array &$ir, array $globalVars): void
+    {
+        // Get the array pointer
+        $arrayPtr = $this->generateExpression($arrayAssignment->arrayAccess->array, $ir, $globalVars);
 
+        // Get the index pointer
+        $indexPtr = $this->generateExpression($arrayAssignment->arrayAccess->index, $ir, $globalVars);
+
+        // Get the value pointer
+        $valuePtr = $this->generateExpression($arrayAssignment->value, $ir, $globalVars);
+
+        // Convert index to integer
+        $indexInt = $this->getNextTempVariable();
+        $ir[] = "  {$indexInt} = call i32 @php_zval_to_int(%struct.zval* {$indexPtr})";
+
+        // Call php_array_set_by_index with the integer index
+        $ir[] = "  call void @php_array_set_by_index(%struct.zval* {$arrayPtr}, i32 {$indexInt}, %struct.zval* {$valuePtr})";
+
+        $ir[] = "";
+    }
 
     private function generateFunctionDefinition(FunctionDefinition $funcDef, array &$ir, array $globalVars): void
     {

@@ -15,4 +15,12 @@ echo $assoc["a"] . " "; // 1
 echo $assoc["b"] . " "; // 2
 echo $assoc["c"] . "\n"; // 3
 
+
+// Array assignment / update
+$nums[1] = 42;
+echo "Updated numeric array:\n";
+echo $nums[0] . " "; // 10
+echo $nums[1] . " "; // 42
+echo $nums[2] . "\n"; // 30
+
 ?>

@@ -21,6 +21,7 @@ use PhpCompiler\AST\WhileStatement;
 use PhpCompiler\AST\DoWhileStatement;
 use PhpCompiler\AST\ArrayLiteral;
 use PhpCompiler\AST\ArrayAccess;
+use PhpCompiler\AST\ArrayAssignment;
 
 class Parser
 {
@@ -80,6 +81,10 @@ class Parser
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_ASSIGN) {
             // Assignment statement
             return $this->parseAssignment();
+        } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_LBRACKET) {
+            // Array access assignment: $var[index] = value
+            // We need to check if there's an assignment after the array access
+            return $this->parseArrayAssignment();
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && in_array($this->peekToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
             // Increment/decrement statement ($i++ or $i--)
             $varToken = $this->consumeToken();
@@ -248,6 +253,50 @@ class Parser
         }
 
         return new Assignment($variable, $operator, $value, $varToken->line, $varToken->column);
+    }
+
+    private function parseArrayAssignment(): ArrayAssignment
+    {
+        // Parse the array access: $var[index]
+        $varToken = $this->consumeToken(); // Consume variable
+        $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
+
+        $this->consumeTokenOfType(TokenType::T_LBRACKET); // Consume [
+        $index = $this->parseExpression();
+        $this->consumeTokenOfType(TokenType::T_RBRACKET); // Consume ]
+
+        $arrayAccess = new ArrayAccess($variable, $index, $varToken->line, $varToken->column);
+
+        // Parse the assignment operator
+        $opToken = $this->currentToken();
+        $operator = '';
+        if ($opToken->type === TokenType::T_ASSIGN) {
+            $operator = '=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_PLUS) {
+            $operator = '+=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_MINUS) {
+            $operator = '-=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_MULTIPLY) {
+            $operator = '*=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_DIVIDE) {
+            $operator = '/=';
+            $this->consumeToken();
+        } else {
+            throw new \RuntimeException("Expected assignment operator at line {$opToken->line}, column {$opToken->column}");
+        }
+
+        $value = $this->parseExpression();
+
+        // Consume semicolon
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+            $this->consumeToken();
+        }
+
+        return new ArrayAssignment($arrayAccess, $operator, $value, $varToken->line, $varToken->column);
     }
 
     private function parseArguments(): array

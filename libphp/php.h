@@ -133,6 +133,15 @@ void php_array_get(zval* result, zval* arr, zval* index);
  */
 void php_array_set(zval* arr, const char* key, zval* value);
 
+/**
+ * Sets a value at a numeric index in an array.
+ *
+ * @param arr The array zval
+ * @param index The numeric index
+ * @param value The value to set
+ */
+void php_array_set_by_index(zval* arr, int index, zval* value);
+
 #ifdef __cplusplus
 }
 #endif
