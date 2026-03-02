@@ -363,12 +363,20 @@ class Generator
         // Get the value pointer
         $valuePtr = $this->generateExpression($arrayAssignment->value, $ir, $globalVars);
 
-        // Convert index to integer
-        $indexInt = $this->getNextTempVariable();
-        $ir[] = "  {$indexInt} = call i32 @php_zval_to_int(%struct.zval* {$indexPtr})";
-
-        // Call php_array_set_by_index with the integer index
-        $ir[] = "  call void @php_array_set_by_index(%struct.zval* {$arrayPtr}, i32 {$indexInt}, %struct.zval* {$valuePtr})";
+        // Check if the index is a string literal (associative array assignment)
+        if ($arrayAssignment->arrayAccess->index instanceof StringLiteral) {
+            // For string keys, use php_array_set
+            $globalName = "__str_const_" . md5($arrayAssignment->arrayAccess->index->value);
+            $globalData = $globalVars[$globalName];
+            $keyPtr = $this->getNextTempVariable();
+            $ir[] = "  {$keyPtr} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+            $ir[] = "  call void @php_array_set(%struct.zval* {$arrayPtr}, i8* {$keyPtr}, %struct.zval* {$valuePtr})";
+        } else {
+            // For numeric keys, use php_array_set_by_index
+            $indexInt = $this->getNextTempVariable();
+            $ir[] = "  {$indexInt} = call i32 @php_zval_to_int(%struct.zval* {$indexPtr})";
+            $ir[] = "  call void @php_array_set_by_index(%struct.zval* {$arrayPtr}, i32 {$indexInt}, %struct.zval* {$valuePtr})";
+        }
 
         $ir[] = "";
     }

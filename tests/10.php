@@ -23,4 +23,10 @@ echo $nums[0] . " "; // 10
 echo $nums[1] . " "; // 42
 echo $nums[2] . "\n"; // 30
 
+$assoc["b"] = 99;
+echo "Updated associative array:\n";
+echo $assoc["a"] . " "; // 1
+echo $assoc["b"] . " "; // 99
+echo $assoc["c"] . "\n"; // 3
+
 ?>
