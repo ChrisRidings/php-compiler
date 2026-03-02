@@ -10,6 +10,9 @@ require_once __DIR__ . '/../ast/Expression.php';
 require_once __DIR__ . '/../ast/Statement.php';
 require_once __DIR__ . '/../ast/StringLiteral.php';
 require_once __DIR__ . '/../ast/EchoStatement.php';
+require_once __DIR__ . '/../ast/Parameter.php';
+require_once __DIR__ . '/../ast/FunctionDefinition.php';
+require_once __DIR__ . '/../ast/FunctionCall.php';
 require_once __DIR__ . '/../ast/Parser.php';
 require_once __DIR__ . '/Generator.php';
 

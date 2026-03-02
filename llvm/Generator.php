@@ -9,6 +9,8 @@ use PhpCompiler\AST\Node;
 use PhpCompiler\AST\Parser;
 use PhpCompiler\AST\Statement;
 use PhpCompiler\AST\StringLiteral;
+use PhpCompiler\AST\FunctionDefinition;
+use PhpCompiler\AST\FunctionCall;
 
 class Generator
 {
@@ -56,12 +58,29 @@ class Generator
             $ir[] = "";
         }
 
+        // Separate statements into function definitions and other statements
+        $functionDefinitions = [];
+        $otherStatements = [];
+
+        foreach ($this->statements as $statement) {
+            if ($statement instanceof FunctionDefinition) {
+                $functionDefinitions[] = $statement;
+            } else {
+                $otherStatements[] = $statement;
+            }
+        }
+
+        // Generate function definitions
+        foreach ($functionDefinitions as $funcDef) {
+            $this->generateStatement($funcDef, $ir, $globalVars);
+        }
+
         // Define main function
         $ir[] = "define i32 @main() {";
         $ir[] = "entry:";
 
-        // Generate code for each statement
-        foreach ($this->statements as $statement) {
+        // Generate code for other statements (should be function calls)
+        foreach ($otherStatements as $statement) {
             $this->generateStatement($statement, $ir, $globalVars);
         }
 
@@ -79,6 +98,14 @@ class Generator
             foreach ($node->expressions as $expression) {
                 $this->collectGlobals($expression, $globalVars);
             }
+        } elseif ($node instanceof FunctionDefinition) {
+            foreach ($node->body as $statement) {
+                $this->collectGlobals($statement, $globalVars);
+            }
+        } elseif ($node instanceof FunctionCall) {
+            foreach ($node->arguments as $arg) {
+                $this->collectGlobals($arg, $globalVars);
+            }
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
@@ -95,6 +122,10 @@ class Generator
     {
         if ($statement instanceof EchoStatement) {
             $this->generateEchoStatement($statement, $ir, $globalVars);
+        } elseif ($statement instanceof FunctionDefinition) {
+            $this->generateFunctionDefinition($statement, $ir, $globalVars);
+        } elseif ($statement instanceof FunctionCall) {
+            $this->generateFunctionCall($statement, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -105,6 +136,36 @@ class Generator
                 )
             );
         }
+    }
+
+    private function generateFunctionDefinition(FunctionDefinition $funcDef, array &$ir, array $globalVars): void
+    {
+        // Generate function prototype
+        $paramTypes = implode(', ', array_fill(0, count($funcDef->parameters), 'i8*'));
+        $ir[] = "define void @{$funcDef->name}({$paramTypes}) {";
+        $ir[] = "entry:";
+
+        // Generate function body
+        foreach ($funcDef->body as $statement) {
+            $this->generateStatement($statement, $ir, $globalVars);
+        }
+
+        $ir[] = "  ret void";
+        $ir[] = "}";
+        $ir[] = "";
+    }
+
+    private function generateFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        // Generate arguments
+        $args = [];
+        foreach ($funcCall->arguments as $arg) {
+            $args[] = $this->generateExpression($arg, $ir, $globalVars);
+        }
+
+        $argStr = implode(', ', $args);
+        $ir[] = "  call void @{$funcCall->name}({$argStr})";
+        $ir[] = "";
     }
 
     private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void

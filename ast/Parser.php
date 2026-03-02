@@ -7,6 +7,9 @@ namespace PhpCompiler\AST;
 use PhpCompiler\Lexer\Lexer;
 use PhpCompiler\Lexer\Token;
 use PhpCompiler\Lexer\TokenType;
+use PhpCompiler\AST\FunctionDefinition;
+use PhpCompiler\AST\FunctionCall;
+use PhpCompiler\AST\Parameter;
 
 class Parser
 {
@@ -52,6 +55,16 @@ class Parser
 
         if ($token->type === TokenType::T_ECHO) {
             return $this->parseEchoStatement();
+        } elseif ($token->type === TokenType::T_FUNCTION) {
+            return $this->parseFunctionDefinition();
+        } elseif ($token->type === TokenType::T_IDENTIFIER && $this->peekToken() && $this->peekToken()->type === TokenType::T_LPAREN) {
+            // Function call as statement
+            $call = $this->parseFunctionCall();
+            // Check for semicolon
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+                $this->consumeToken();
+            }
+            return $call; // We'll treat function calls as statements for now
         }
 
         // Provide better error information
@@ -69,6 +82,96 @@ class Parser
                 $context
             )
         );
+    }
+
+    private function parseFunctionDefinition(): FunctionDefinition
+    {
+        $functionToken = $this->consumeToken(); // Consume 'function'
+
+        $nameToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        $parameters = $this->parseParameters();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+        $this->consumeTokenOfType(TokenType::T_LBRACE);
+
+        $body = $this->parseFunctionBody();
+
+        $this->consumeTokenOfType(TokenType::T_RBRACE);
+
+        return new FunctionDefinition(
+            $nameToken->value,
+            $parameters,
+            $body,
+            $functionToken->line,
+            $functionToken->column
+        );
+    }
+
+    private function parseParameters(): array
+    {
+        $parameters = [];
+
+        if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
+            // Parse first parameter
+            $paramToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
+            $parameters[] = new Parameter($paramToken->value, $paramToken->line, $paramToken->column);
+
+            // Parse additional parameters
+            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
+                // We'll skip any other token types for now (like type hints)
+                $this->consumeToken();
+            }
+        }
+
+        return $parameters;
+    }
+
+    private function parseFunctionBody(): array
+    {
+        $body = [];
+
+        while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+            $body[] = $this->parseStatement();
+        }
+
+        return $body;
+    }
+
+    private function parseFunctionCall(): FunctionCall
+    {
+        $nameToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        $arguments = $this->parseArguments();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        return new FunctionCall(
+            $nameToken->value,
+            $arguments,
+            $nameToken->line,
+            $nameToken->column
+        );
+    }
+
+    private function parseArguments(): array
+    {
+        $arguments = [];
+
+        if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
+            // Parse first argument
+            $arguments[] = $this->parseExpression();
+
+            // Parse additional arguments
+            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
+                // Skip any other token types for now
+                $this->consumeToken();
+            }
+        }
+
+        return $arguments;
     }
 
     private function getContext(Token $token): string
