@@ -19,6 +19,8 @@ enum TokenType: int
     case T_RBRACE = 11;
     case T_FUNCTION_CALL = 12;
     case T_NEWLINE = 13;
+    case T_VARIABLE = 14;
+    case T_DOLLAR = 15;
 }
 
 class Token

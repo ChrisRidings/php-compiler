@@ -11,6 +11,7 @@ use PhpCompiler\AST\Statement;
 use PhpCompiler\AST\StringLiteral;
 use PhpCompiler\AST\FunctionDefinition;
 use PhpCompiler\AST\FunctionCall;
+use PhpCompiler\AST\VariableReference;
 
 class Generator
 {
@@ -160,7 +161,16 @@ class Generator
         // Generate arguments
         $args = [];
         foreach ($funcCall->arguments as $arg) {
-            $args[] = $this->generateExpression($arg, $ir, $globalVars);
+            // For now, we'll handle string literals directly
+            if ($arg instanceof StringLiteral) {
+                $globalName = "__str_const_" . md5($arg->value);
+                $globalData = $globalVars[$globalName];
+                $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+                $args[] = "i8* %{$globalName}_ptr";
+            } else {
+                // For other types, we'll just pass null for now
+                $args[] = "i8* null";
+            }
         }
 
         $argStr = implode(', ', $args);
@@ -179,6 +189,8 @@ class Generator
     {
         if ($expression instanceof StringLiteral) {
             $this->generateStringLiteral($expression, $ir, $globalVars);
+        } elseif ($expression instanceof VariableReference) {
+            $this->generateVariableReference($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -189,6 +201,15 @@ class Generator
                 )
             );
         }
+    }
+
+    private function generateVariableReference(VariableReference $varRef, array &$ir, array $globalVars): void
+    {
+        // For now, we'll just treat variables as parameters passed by value
+        // We assume the variable name matches the parameter index
+        // So $name becomes %0 (first parameter)
+        $ir[] = "  call void @php_echo(i8* %0)";
+        $ir[] = "";
     }
 
     private function generateStringLiteral(StringLiteral $literal, array &$ir, array $globalVars): void

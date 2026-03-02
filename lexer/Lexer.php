@@ -16,6 +16,7 @@ class Lexer
         TokenType::T_ECHO->value => '/^echo\b/i',
         TokenType::T_FUNCTION->value => '/^function\b/i',
         TokenType::T_STRING->value => '/^"(?:\\.|[^"\\\\])*"|\'(?:\\.|[^\'\\\\])*\'/',
+        TokenType::T_VARIABLE->value => '/^\$[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*/',
         TokenType::T_IDENTIFIER->value => '/^[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*/',
         TokenType::T_LPAREN->value => '/^\(/',
         TokenType::T_RPAREN->value => '/^\)/',

@@ -10,6 +10,7 @@ use PhpCompiler\Lexer\TokenType;
 use PhpCompiler\AST\FunctionDefinition;
 use PhpCompiler\AST\FunctionCall;
 use PhpCompiler\AST\Parameter;
+use PhpCompiler\AST\VariableReference;
 
 class Parser
 {
@@ -115,12 +116,14 @@ class Parser
 
         if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
             // Parse first parameter
-            $paramToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
-            $parameters[] = new Parameter($paramToken->value, $paramToken->line, $paramToken->column);
+            if ($this->currentToken()->type === TokenType::T_VARIABLE) {
+                $paramToken = $this->consumeToken();
+                $parameters[] = new Parameter(ltrim($paramToken->value, '$'), $paramToken->line, $paramToken->column);
+            }
 
             // Parse additional parameters
             while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
-                // We'll skip any other token types for now (like type hints)
+                // We'll skip any other token types for now (like type hints or commas)
                 $this->consumeToken();
             }
         }
@@ -217,6 +220,9 @@ class Parser
         if ($token->type === TokenType::T_STRING) {
             $this->consumeToken();
             return StringLiteral::fromQuotedString($token->value, $token->line, $token->column);
+        } elseif ($token->type === TokenType::T_VARIABLE) {
+            $this->consumeToken();
+            return new VariableReference(ltrim($token->value, '$'), $token->line, $token->column);
         }
 
         throw new \RuntimeException(

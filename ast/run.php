@@ -13,6 +13,7 @@ require_once __DIR__ . '/EchoStatement.php';
 require_once __DIR__ . '/Parameter.php';
 require_once __DIR__ . '/FunctionDefinition.php';
 require_once __DIR__ . '/FunctionCall.php';
+require_once __DIR__ . '/VariableReference.php';
 require_once __DIR__ . '/Parser.php';
 
 use PhpCompiler\AST\Parser;
