@@ -440,25 +440,36 @@ class Parser
         $condition = $this->parseExpression();
 
         $this->consumeTokenOfType(TokenType::T_RPAREN);
-        $this->consumeTokenOfType(TokenType::T_LBRACE);
 
+        // Then body - can be either a single statement or a block
         $thenBody = [];
-        while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LBRACE) {
+            // Block with braces
+            $this->consumeTokenOfType(TokenType::T_LBRACE);
+            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+                $thenBody[] = $this->parseStatement();
+            }
+            $this->consumeTokenOfType(TokenType::T_RBRACE);
+        } else {
+            // Single statement without braces
             $thenBody[] = $this->parseStatement();
         }
-
-        $this->consumeTokenOfType(TokenType::T_RBRACE);
 
         $elseBody = [];
         if ($this->currentToken() && $this->currentToken()->type === TokenType::T_ELSE) {
             $this->consumeToken(); // Consume 'else'
-            $this->consumeTokenOfType(TokenType::T_LBRACE);
 
-            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LBRACE) {
+                // Block with braces
+                $this->consumeTokenOfType(TokenType::T_LBRACE);
+                while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+                    $elseBody[] = $this->parseStatement();
+                }
+                $this->consumeTokenOfType(TokenType::T_RBRACE);
+            } else {
+                // Single statement without braces
                 $elseBody[] = $this->parseStatement();
             }
-
-            $this->consumeTokenOfType(TokenType::T_RBRACE);
         }
 
         return new IfStatement($condition, $thenBody, $elseBody, $ifToken->line, $ifToken->column);
