@@ -14,7 +14,9 @@ use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\BooleanLiteral;
+use PhpCompiler\AST\UnaryOperation;
 use PhpCompiler\AST\ReturnStatement;
+use PhpCompiler\AST\ContinueStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
 use PhpCompiler\AST\ForStatement;
@@ -126,6 +128,14 @@ class Parser
         } elseif ($token->type === TokenType::T_DECLARE) {
             // Declare statement - PHP runtime directive, treat as no-op
             return $this->parseDeclareStatement();
+        } elseif ($token->type === TokenType::T_CONTINUE) {
+            // Continue statement
+            $continueToken = $this->consumeToken();
+            // Consume semicolon if present
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+                $this->consumeToken();
+            }
+            return new ContinueStatement($continueToken->line, $continueToken->column);
         }
 
         // Provide better error information
@@ -720,6 +730,13 @@ class Parser
 
         if ($token === null) {
             throw new \RuntimeException("Unexpected end of input when parsing primary expression");
+        }
+
+        // Handle unary operators: !expr
+        if ($token->type === TokenType::T_NOT) {
+            $notToken = $this->consumeToken();
+            $operand = $this->parsePrimary();
+            return new UnaryOperation(UnaryOperation::OP_NOT, $operand, $notToken->line, $notToken->column);
         }
 
         // Handle assignment as expression: $var = expr

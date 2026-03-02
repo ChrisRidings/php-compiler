@@ -28,3 +28,15 @@ $failCount = 0;
 
 echo "Running PHP to LLVM tests...\n";
 echo str_repeat('-', 70) . "\n";
+
+foreach ($testFiles as $testFile) {
+    $testPath = $testDir . '/' . $testFile;
+
+    if (!file_exists($testPath)) {
+        echo "WARNING: Test file $testFile not found\n";
+        $failCount++;
+        continue;
+    }
+
+    echo "Testing $testFile...\n";
+}

@@ -708,6 +708,31 @@ void php_str_repeat(zval* str, zval* count, zval* result) {
     free(output);
 }
 
+// file_exists implementation
+void php_file_exists(zval* path, zval* result) {
+    if (path->type != PHP_TYPE_STRING || path->value.str_val == NULL) {
+        php_zval_bool(result, 0);  // false
+        return;
+    }
+
+    #ifdef _WIN32
+    // Windows: Use GetFileAttributes to check if file exists
+    DWORD attribs = GetFileAttributes(path->value.str_val);
+    if (attribs != INVALID_FILE_ATTRIBUTES) {
+        php_zval_bool(result, 1);  // true
+    } else {
+        php_zval_bool(result, 0);  // false
+    }
+    #else
+    // POSIX: Use access() to check if file exists
+    if (access(path->value.str_val, F_OK) == 0) {
+        php_zval_bool(result, 1);  // true
+    } else {
+        php_zval_bool(result, 0);  // false
+    }
+    #endif
+}
+
 // Strict inequality comparison (!==)
 void php_zval_strict_ne(zval* a, zval* b, zval* result) {
     // If types are different, they are not identical

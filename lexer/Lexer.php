@@ -29,6 +29,7 @@ class Lexer
         TokenType::T_DECLARE->value => '/^declare\b/i',
         TokenType::T_TRUE->value => '/^true\b/i',
         TokenType::T_FALSE->value => '/^false\b/i',
+        TokenType::T_CONTINUE->value => '/^continue\b/i',
         // String literals - simple pattern that matches anything between quotes
         // Double-quoted strings can have escaped quotes, single-quoted treat \' as escape
         TokenType::T_STRING->value => '/^(?:"[^"]*"|\'[^\']*\')/',
@@ -51,6 +52,7 @@ class Lexer
         TokenType::T_NOT_IDENTICAL->value => '/^!==/',
         TokenType::T_EQUAL->value => '/^==/',
         TokenType::T_NOT_EQUAL->value => '/^!=/',
+        TokenType::T_NOT->value => '/^!/',
         TokenType::T_PLUS_PLUS->value => '/^\+\+/',
         TokenType::T_MINUS_MINUS->value => '/^--/',
         TokenType::T_ASSIGN_PLUS->value => '/^\+=/',

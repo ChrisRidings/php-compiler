@@ -59,6 +59,8 @@ enum TokenType: int
     case T_NOT_IDENTICAL = 51;   // !==
     case T_TRUE = 52;            // true
     case T_FALSE = 53;           // false
+    case T_NOT = 54;             // ! (boolean NOT)
+    case T_CONTINUE = 55;        // continue
 }
 
 class Token

@@ -229,6 +229,14 @@ void php_print_r(zval* value, zval* result);
 void php_str_repeat(zval* str, zval* count, zval* result);
 
 /**
+ * Check if a file exists.
+ *
+ * @param path The file path to check
+ * @param result The result zval (will be true if file exists, false otherwise)
+ */
+void php_file_exists(zval* path, zval* result);
+
+/**
  * Strict inequality comparison (!==).
  * Returns true if values are not identical (different types or different values).
  *

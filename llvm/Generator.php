@@ -16,7 +16,9 @@ use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\BooleanLiteral;
+use PhpCompiler\AST\UnaryOperation;
 use PhpCompiler\AST\ReturnStatement;
+use PhpCompiler\AST\ContinueStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
 use PhpCompiler\AST\ForStatement;
@@ -40,6 +42,12 @@ class Generator
      * @var array<string, bool>
      */
     private array $declaredVars = [];
+
+    /**
+     * Stack to track loop header blocks for continue statements
+     * @var string[]
+     */
+    private array $loopHeaderStack = [];
 
     public function __construct(array $statements)
     {
@@ -104,6 +112,7 @@ class Generator
         $ir[] = "declare void @php_zval_strict_ne(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_zval_strict_eq(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_str_repeat(%struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_file_exists(%struct.zval*, %struct.zval*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -310,6 +319,13 @@ class Generator
         } elseif ($statement instanceof DeclareStatement) {
             // Declare statement is a PHP runtime directive - no code generation needed
             // It's treated as a no-op since it affects PHP's runtime behavior, not compiled code
+        } elseif ($statement instanceof ContinueStatement) {
+            // Continue statement - jump to the current loop header
+            if (empty($this->loopHeaderStack)) {
+                throw new \RuntimeException("Continue statement outside of loop at line {$statement->line}");
+            }
+            $loopHeader = end($this->loopHeaderStack);
+            $ir[] = "  br label %{$loopHeader}";
         } elseif ($statement instanceof ExpressionStatement) {
             // Expression statement - evaluate the expression and discard the result
             $this->generateExpression($statement->expression, $ir, $globalVars);
@@ -557,6 +573,9 @@ class Generator
         } elseif ($funcCall->name === 'str_repeat') {
             $this->generateStrRepeatFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'file_exists') {
+            $this->generateFileExistsFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -743,6 +762,24 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateFileExistsFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("file_exists() expects exactly 1 argument");
+        }
+
+        // Generate the path argument
+        $pathPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_file_exists function
+        $ir[] = "  call void @php_file_exists(%struct.zval* {$pathPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
     private function generateArrayValuesExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -855,6 +892,19 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateFileExistsExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("file_exists() expects exactly 1 argument");
+        }
+
+        $pathPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_file_exists(%struct.zval* {$pathPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
     private function generateCountExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -895,6 +945,8 @@ class Generator
             return $this->generateIntegerLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof BooleanLiteral) {
             return $this->generateBooleanLiteral($expression, $ir, $globalVars);
+        } elseif ($expression instanceof UnaryOperation) {
+            return $this->generateUnaryOperation($expression, $ir, $globalVars);
         } elseif ($expression instanceof BinaryOperation) {
             return $this->generateBinaryOperation($expression, $ir, $globalVars);
         } elseif ($expression instanceof FunctionCall) {
@@ -917,6 +969,8 @@ class Generator
                 return $this->generatePrintRExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'str_repeat') {
                 return $this->generateStrRepeatExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'file_exists') {
+                return $this->generateFileExistsExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval
@@ -971,6 +1025,35 @@ class Generator
         $ir[] = "  {$result} = alloca %struct.zval";
         $boolVal = $literal->value ? 1 : 0;
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 {$boolVal})";
+        return $result;
+    }
+
+    private function generateUnaryOperation(UnaryOperation $op, array &$ir, array $globalVars): string
+    {
+        $operandPtr = $this->generateExpression($op->operand, $ir, $globalVars);
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+
+        switch ($op->operator) {
+            case '!':
+                // Boolean NOT: convert operand to int, check if zero, then invert
+                $operandInt = $this->getNextTempVariable();
+                $ir[] = "  {$operandInt} = call i32 @php_zval_to_int(%struct.zval* {$operandPtr})";
+
+                // Check if operand is false (0)
+                $isZero = $this->getNextTempVariable();
+                $ir[] = "  {$isZero} = icmp eq i32 {$operandInt}, 0";
+
+                // Convert i1 to i32 (0 or 1)
+                $notResult = $this->getNextTempVariable();
+                $ir[] = "  {$notResult} = zext i1 {$isZero} to i32";
+
+                $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 {$notResult})";
+                break;
+            default:
+                throw new \RuntimeException("Unsupported unary operation: " . $op->operator);
+        }
+
         return $result;
     }
 
@@ -1290,6 +1373,9 @@ class Generator
         // Jump to loop header
         $ir[] = "  br label %{$loopHeaderBlock}";
 
+        // Push loop header onto stack for continue statements
+        $this->loopHeaderStack[] = $loopHeaderBlock;
+
         // Loop header block - check if index < array_size
         $ir[] = "{$loopHeaderBlock}:";
         $currentIndex = $this->getNextTempVariable();
@@ -1361,6 +1447,9 @@ class Generator
 
         // Jump back to header
         $ir[] = "  br label %{$loopHeaderBlock}";
+
+        // Pop loop header from stack
+        array_pop($this->loopHeaderStack);
 
         // After loop block
         $ir[] = "{$loopAfterBlock}:";
