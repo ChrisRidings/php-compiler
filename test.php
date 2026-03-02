@@ -1,11 +1,6 @@
 <?php
-function greet_length($name) {
-    $greeting = "Hello, ";
-    echo $greeting;
-    echo $name;
-    echo "!";
-    return 5;
+function factorial($n) {
+    if ($n <= 1) return 1;
+    return $n * factorial($n - 1);
 }
-
-$result = greet_length("Alice");
-echo $result;
+echo factorial(5);

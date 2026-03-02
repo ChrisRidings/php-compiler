@@ -1340,21 +1340,35 @@ class Generator
 
         // Generate then block
         $ir[] = "{$thenBlock}:";
+        $thenHasReturn = false;
         foreach ($ifStmt->thenBody as $statement) {
-            $this->generateStatement($statement, $ir, $globalVars);
+            $this->generateStatement($statement, $ir, $globalVars, $inFunction);
+            if ($statement instanceof ReturnStatement) {
+                $thenHasReturn = true;
+            }
         }
-        $ir[] = "  br label %{$mergeBlock}";
+        if (!$thenHasReturn) {
+            $ir[] = "  br label %{$mergeBlock}";
+        }
 
         // Generate else block
         $ir[] = "{$elseBlock}:";
+        $elseHasReturn = false;
         foreach ($ifStmt->elseBody as $statement) {
-            $this->generateStatement($statement, $ir, $globalVars);
+            $this->generateStatement($statement, $ir, $globalVars, $inFunction);
+            if ($statement instanceof ReturnStatement) {
+                $elseHasReturn = true;
+            }
         }
-        $ir[] = "  br label %{$mergeBlock}";
+        if (!$elseHasReturn) {
+            $ir[] = "  br label %{$mergeBlock}";
+        }
 
-        // Generate merge block
-        $ir[] = "{$mergeBlock}:";
-        $ir[] = "";
+        // Generate merge block (only if at least one branch continues)
+        if (!$thenHasReturn || !$elseHasReturn) {
+            $ir[] = "{$mergeBlock}:";
+            $ir[] = "";
+        }
     }
 
     private function generateExpressionAsInteger(\PhpCompiler\AST\Expression $expr, array &$ir, array $globalVars): string
