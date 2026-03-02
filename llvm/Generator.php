@@ -209,7 +209,6 @@ class Generator
 
     private function generateFunctionDefinition(FunctionDefinition $funcDef, array &$ir, array $globalVars): void
     {
-        // Determine return type based on body
         $returnType = "void";
         foreach ($funcDef->body as $statement) {
             if ($statement instanceof ReturnStatement && $statement->value instanceof IntegerLiteral) {
@@ -218,21 +217,28 @@ class Generator
             }
         }
 
-        // Generate function prototype
         $paramTypes = implode(', ', array_fill(0, count($funcDef->parameters), 'i8*'));
         $ir[] = "define {$returnType} @{$funcDef->name}({$paramTypes}) {";
         $ir[] = "entry:";
 
-        // Generate function body
         foreach ($funcDef->body as $statement) {
             $this->generateStatement($statement, $ir, $globalVars);
         }
 
-        // If no return statement was found, add a default return
-        if ($returnType === "void") {
-            $ir[] = "  ret void";
-        } else {
-            $ir[] = "  ret i32 0";
+        $hasReturn = false;
+        foreach ($funcDef->body as $statement) {
+            if ($statement instanceof ReturnStatement) {
+                $hasReturn = true;
+                break;
+            }
+        }
+
+        if (!$hasReturn) {
+            if ($returnType === "void") {
+                $ir[] = "  ret void";
+            } else {
+                $ir[] = "  ret i32 0";
+            }
         }
 
         $ir[] = "}";
