@@ -10,6 +10,12 @@ class BinaryOperation extends Expression
     public const OP_SUBTRACT = '-';
     public const OP_MULTIPLY = '*';
     public const OP_DIVIDE = '/';
+    public const OP_GREATER = '>';
+    public const OP_GREATER_EQUAL = '>=';
+    public const OP_LESS = '<';
+    public const OP_LESS_EQUAL = '<=';
+    public const OP_EQUAL = '==';
+    public const OP_NOT_EQUAL = '!=';
 
     public function __construct(
         public readonly Expression $left,

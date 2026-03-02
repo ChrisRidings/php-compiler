@@ -15,6 +15,7 @@ use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\BinaryOperation;
+use PhpCompiler\AST\IfStatement;
 
 class Parser
 {
@@ -77,6 +78,9 @@ class Parser
         } elseif ($token->type === TokenType::T_RETURN) {
             // Return statement
             return $this->parseReturnStatement();
+        } elseif ($token->type === TokenType::T_IF) {
+            // If statement
+            return $this->parseIfStatement();
         }
 
         // Provide better error information
@@ -240,6 +244,38 @@ class Parser
         return implode(' → ', $context);
     }
 
+    private function parseIfStatement(): IfStatement
+    {
+        $ifToken = $this->consumeToken(); // Consume 'if'
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        $condition = $this->parseExpression();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+        $this->consumeTokenOfType(TokenType::T_LBRACE);
+
+        $thenBody = [];
+        while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+            $thenBody[] = $this->parseStatement();
+        }
+
+        $this->consumeTokenOfType(TokenType::T_RBRACE);
+
+        $elseBody = [];
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_ELSE) {
+            $this->consumeToken(); // Consume 'else'
+            $this->consumeTokenOfType(TokenType::T_LBRACE);
+
+            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+                $elseBody[] = $this->parseStatement();
+            }
+
+            $this->consumeTokenOfType(TokenType::T_RBRACE);
+        }
+
+        return new IfStatement($condition, $thenBody, $elseBody, $ifToken->line, $ifToken->column);
+    }
+
     private function parseEchoStatement(): EchoStatement
     {
         $token = $this->consumeToken(); // Consume 'echo'
@@ -256,11 +292,26 @@ class Parser
     {
         $expression = $this->parseTerm();
 
-        while ($this->currentToken() && in_array($this->currentToken()->type, [TokenType::T_PLUS, TokenType::T_MINUS])) {
+        while ($this->currentToken() && in_array($this->currentToken()->type, [
+            TokenType::T_PLUS,
+            TokenType::T_MINUS,
+            TokenType::T_GREATER,
+            TokenType::T_GREATER_EQUAL,
+            TokenType::T_LESS,
+            TokenType::T_LESS_EQUAL,
+            TokenType::T_EQUAL,
+            TokenType::T_NOT_EQUAL
+        ])) {
             $operatorToken = $this->consumeToken();
             $operator = match ($operatorToken->type) {
                 TokenType::T_PLUS => BinaryOperation::OP_ADD,
                 TokenType::T_MINUS => BinaryOperation::OP_SUBTRACT,
+                TokenType::T_GREATER => BinaryOperation::OP_GREATER,
+                TokenType::T_GREATER_EQUAL => BinaryOperation::OP_GREATER_EQUAL,
+                TokenType::T_LESS => BinaryOperation::OP_LESS,
+                TokenType::T_LESS_EQUAL => BinaryOperation::OP_LESS_EQUAL,
+                TokenType::T_EQUAL => BinaryOperation::OP_EQUAL,
+                TokenType::T_NOT_EQUAL => BinaryOperation::OP_NOT_EQUAL,
                 default => throw new \RuntimeException("Unexpected operator at " . $operatorToken->line . ":" . $operatorToken->column),
             };
             $right = $this->parseTerm();

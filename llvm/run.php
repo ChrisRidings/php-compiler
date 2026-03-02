@@ -18,6 +18,7 @@ require_once __DIR__ . '/../ast/FunctionDefinition.php';
 require_once __DIR__ . '/../ast/FunctionCall.php';
 require_once __DIR__ . '/../ast/VariableReference.php';
 require_once __DIR__ . '/../ast/Assignment.php';
+require_once __DIR__ . '/../ast/IfStatement.php';
 require_once __DIR__ . '/../ast/Parser.php';
 require_once __DIR__ . '/Generator.php';
 

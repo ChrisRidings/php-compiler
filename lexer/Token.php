@@ -28,6 +28,14 @@ enum TokenType: int
     case T_MINUS = 20;
     case T_MULTIPLY = 21;
     case T_DIVIDE = 22;
+    case T_IF = 23;
+    case T_ELSE = 24;
+    case T_GREATER = 25;
+    case T_GREATER_EQUAL = 26;
+    case T_LESS = 27;
+    case T_LESS_EQUAL = 28;
+    case T_EQUAL = 29;
+    case T_NOT_EQUAL = 30;
 }
 
 class Token

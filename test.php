@@ -1,6 +1,13 @@
 <?php
-function say_hello() {
-    echo "Hello, world!";
+
+$x = 10;
+
+if ($x > 5) {
+    echo "big\n";
+} else {
+    echo "small\n";
 }
 
-say_hello();
+if ($x > 8) {
+    echo "more than 8!\n";
+}

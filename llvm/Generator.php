@@ -16,6 +16,7 @@ use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\BinaryOperation;
+use PhpCompiler\AST\IfStatement;
 
 class Generator
 {
@@ -160,14 +161,23 @@ class Generator
             if ($node->value !== null) {
                 $this->collectGlobals($node->value, $globalVars);
             }
+        } elseif ($node instanceof IfStatement) {
+            $this->collectGlobals($node->condition, $globalVars);
+            foreach ($node->thenBody as $statement) {
+                $this->collectGlobals($statement, $globalVars);
+            }
+            foreach ($node->elseBody as $statement) {
+                $this->collectGlobals($statement, $globalVars);
+            }
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
-                $globalVars[$globalName] = [
-                    'value' => $node->value,
-                    'escapedValue' => $this->escapeString($node->value),
-                    'length' => strlen($node->value) + 1 // +1 for null terminator
-                ];
+                $escapedValue = $this->escapeString($node->value);
+            $globalVars[$globalName] = [
+                'value' => $node->value,
+                'escapedValue' => $escapedValue,
+                'length' => strlen($escapedValue) + 1 // +1 for null terminator
+            ];
             }
         }
         // Handle all other statement types to ensure arguments are collected
@@ -192,6 +202,8 @@ class Generator
             $this->generateAssignment($statement, $ir, $globalVars);
         } elseif ($statement instanceof ReturnStatement) {
             $this->generateReturnStatement($statement, $ir, $globalVars);
+        } elseif ($statement instanceof IfStatement) {
+            $this->generateIfStatement($statement, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -403,23 +415,94 @@ class Generator
                 $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* {$leftStr})";
                 break;
             case '==':
-                // Comparison - this is a simplification for now
-                // We'll convert both to integers for comparison
+            case '!=':
+            case '>':
+            case '>=':
+            case '<':
+            case '<=':
+                // Comparison - convert both to integers for comparison
                 $leftInt = $this->getNextTempVariable();
                 $rightInt = $this->getNextTempVariable();
                 $ir[] = "  {$leftInt} = call i32 @php_zval_to_int(%struct.zval* {$leftZval})";
                 $ir[] = "  {$rightInt} = call i32 @php_zval_to_int(%struct.zval* {$rightZval})";
 
                 $compareResult = $this->getNextTempVariable();
-                $ir[] = "  {$compareResult} = icmp eq i32 {$leftInt}, {$rightInt}";
-                $ir[] = "  %cmp_bool = zext i1 {$compareResult} to i32";
-                $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 %cmp_bool)";
+
+                switch ($op->operator) {
+                    case '==':
+                        $ir[] = "  {$compareResult} = icmp eq i32 {$leftInt}, {$rightInt}";
+                        break;
+                    case '!=':
+                        $ir[] = "  {$compareResult} = icmp ne i32 {$leftInt}, {$rightInt}";
+                        break;
+                    case '>':
+                        $ir[] = "  {$compareResult} = icmp sgt i32 {$leftInt}, {$rightInt}";
+                        break;
+                    case '>=':
+                        $ir[] = "  {$compareResult} = icmp sge i32 {$leftInt}, {$rightInt}";
+                        break;
+                    case '<':
+                        $ir[] = "  {$compareResult} = icmp slt i32 {$leftInt}, {$rightInt}";
+                        break;
+                    case '<=':
+                        $ir[] = "  {$compareResult} = icmp sle i32 {$leftInt}, {$rightInt}";
+                        break;
+                }
+
+                $cmpBool = $this->getNextTempVariable();
+                $ir[] = "  {$cmpBool} = zext i1 {$compareResult} to i32";
+                $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 {$cmpBool})";
                 break;
             default:
                 throw new \RuntimeException("Unsupported binary operation: " . $op->operator);
         }
 
         return $result;
+    }
+
+    private function generateIfStatement(IfStatement $ifStmt, array &$ir, array $globalVars): void
+    {
+        // Generate condition
+        $conditionPtr = $this->generateExpression($ifStmt->condition, $ir, $globalVars);
+
+        // Convert condition to boolean
+        $conditionVal = $this->getNextTempVariable();
+        $ir[] = "  {$conditionVal} = load %struct.zval, %struct.zval* {$conditionPtr}";
+
+        // Convert zval to integer (for boolean check - 0 is false, other values true)
+        $condInt = $this->getNextTempVariable();
+        $ir[] = "  {$condInt} = call i32 @php_zval_to_int(%struct.zval* {$conditionPtr})";
+
+        // Check if condition is true
+        $isTrue = $this->getNextTempVariable();
+        $ir[] = "  {$isTrue} = icmp ne i32 {$condInt}, 0";
+
+        // Create basic blocks (without leading %)
+        static $blockCounter = 0;
+        $thenBlock = "then_" . ++$blockCounter;
+        $elseBlock = "else_" . $blockCounter;
+        $mergeBlock = "merge_" . $blockCounter;
+
+        // Branch to then or else block
+        $ir[] = "  br i1 {$isTrue}, label %{$thenBlock}, label %{$elseBlock}";
+
+        // Generate then block
+        $ir[] = "{$thenBlock}:";
+        foreach ($ifStmt->thenBody as $statement) {
+            $this->generateStatement($statement, $ir, $globalVars);
+        }
+        $ir[] = "  br label %{$mergeBlock}";
+
+        // Generate else block
+        $ir[] = "{$elseBlock}:";
+        foreach ($ifStmt->elseBody as $statement) {
+            $this->generateStatement($statement, $ir, $globalVars);
+        }
+        $ir[] = "  br label %{$mergeBlock}";
+
+        // Generate merge block
+        $ir[] = "{$mergeBlock}:";
+        $ir[] = "";
     }
 
     private function generateExpressionAsInteger(\PhpCompiler\AST\Expression $expr, array &$ir, array $globalVars): string
@@ -471,6 +554,8 @@ class Generator
             "\r" => '\\r',
             "\t" => '\\t',
             "\0" => '\\0',
+            "\b" => '\\b',
+            "\f" => '\\f',
         ];
 
         return strtr($str, $replacements);
