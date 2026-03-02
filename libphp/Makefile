@@ -5,7 +5,7 @@ AR ?= ar
 CFLAGS ?= -Wall -Wextra -O2 -I.
 TARGET = libphp.a
 
-SRCS = stdlib.c
+SRCS = php.c
 OBJS = $(SRCS:.c=.o)
 
 .PHONY: all clean

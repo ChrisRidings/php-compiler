@@ -77,6 +77,7 @@ class Generator
         $ir[] = "declare i32 @php_zval_to_int(%struct.zval*)";
         $ir[] = "declare void @php_echo(i8*)";
         $ir[] = "declare i8* @php_itoa(i32)";
+        $ir[] = "declare i8* @php_concat_strings(i8*, i8*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -177,14 +178,14 @@ class Generator
                 $this->collectGlobals($statement, $globalVars);
             }
         } elseif ($node instanceof ForStatement) {
-            if ($node->initialization) {
-                $this->collectGlobals($node->initialization, $globalVars);
+            foreach ($node->initializations as $init) {
+                $this->collectGlobals($init, $globalVars);
             }
             if ($node->condition) {
                 $this->collectGlobals($node->condition, $globalVars);
             }
-            if ($node->update) {
-                $this->collectGlobals($node->update, $globalVars);
+            foreach ($node->updates as $update) {
+                $this->collectGlobals($update, $globalVars);
             }
             foreach ($node->body as $statement) {
                 $this->collectGlobals($statement, $globalVars);
@@ -463,14 +464,16 @@ class Generator
                 $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 {$intResult})";
                 break;
             case '.':
-                // String concatenation - convert both to strings (this is simplification for now)
+                // String concatenation - convert both to strings
                 $leftStr = $this->getNextTempVariable();
                 $rightStr = $this->getNextTempVariable();
                 $ir[] = "  {$leftStr} = call i8* @php_zval_to_string(%struct.zval* {$leftZval})";
                 $ir[] = "  {$rightStr} = call i8* @php_zval_to_string(%struct.zval* {$rightZval})";
 
-                // For string concatenation, we'd need a helper function - for now, just treat as string literal
-                $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* {$leftStr})";
+                // Concatenate strings using php_concat_strings
+                $concatResult = $this->getNextTempVariable();
+                $ir[] = "  {$concatResult} = call i8* @php_concat_strings(i8* {$leftStr}, i8* {$rightStr})";
+                $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* {$concatResult})";
                 break;
             case '==':
             case '!=':
@@ -526,29 +529,33 @@ class Generator
         $loopBodyBlock = "loop_body_" . $blockCounter;
         $loopAfterBlock = "loop_after_" . $blockCounter;
 
-        // Get the variable name from initialization
-        $loopVarName = null;
-        if ($forStmt->initialization && $forStmt->initialization instanceof Assignment) {
-            $loopVarName = $forStmt->initialization->variable->name;
+        // Get all variable names from initializations
+        $loopVarNames = [];
+        foreach ($forStmt->initializations as $init) {
+            if ($init instanceof Assignment) {
+                $loopVarNames[] = $init->variable->name;
+            }
         }
 
-        // Declare loop variable before any branches (so it dominates all uses)
-        if ($loopVarName && !isset($this->declaredVars[$loopVarName])) {
-            $ir[] = "  %{$loopVarName} = alloca %struct.zval";
-            $this->declaredVars[$loopVarName] = true;
+        // Declare all loop variables before any branches (so they dominate all uses)
+        foreach ($loopVarNames as $loopVarName) {
+            if (!isset($this->declaredVars[$loopVarName])) {
+                $ir[] = "  %{$loopVarName} = alloca %struct.zval";
+                $this->declaredVars[$loopVarName] = true;
+            }
         }
 
-        // Generate initialization statement with unique variable name for this loop
-        if ($forStmt->initialization) {
-            // For assignments, use our declared variable name
-            if ($forStmt->initialization instanceof Assignment && $loopVarName) {
-                $valuePtr = $this->generateExpression($forStmt->initialization->value, $ir, $globalVars);
+        // Generate all initialization statements
+        foreach ($forStmt->initializations as $init) {
+            if ($init instanceof Assignment) {
+                $varName = $init->variable->name;
+                $valuePtr = $this->generateExpression($init->value, $ir, $globalVars);
 
                 $value = $this->getNextTempVariable();
                 $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
-                $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$loopVarName}";
+                $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
             } else {
-                $this->generateStatement($forStmt->initialization, $ir, $globalVars);
+                $this->generateStatement($init, $ir, $globalVars);
             }
         }
 
@@ -581,14 +588,19 @@ class Generator
             $this->generateStatement($statement, $ir, $globalVars);
         }
 
-        // Generate update statement
-        if ($forStmt->update) {
+        // Generate all update statements
+        foreach ($forStmt->updates as $update) {
             // Check if update is assignment or expression
-            if ($forStmt->update instanceof Statement) {
-                $this->generateStatement($forStmt->update, $ir, $globalVars);
-            } elseif ($forStmt->update instanceof Expression) {
+            if ($update instanceof Statement && !$update instanceof ReturnStatement) {
+                $this->generateStatement($update, $ir, $globalVars);
+            } elseif ($update instanceof ReturnStatement) {
+                // If it's a ReturnStatement wrapping an expression, just evaluate the expression
+                if ($update->value) {
+                    $this->generateExpression($update->value, $ir, $globalVars);
+                }
+            } elseif ($update instanceof Expression) {
                 // If it's an expression, just evaluate it and discard result
-                $exprPtr = $this->generateExpression($forStmt->update, $ir, $globalVars);
+                $this->generateExpression($update, $ir, $globalVars);
             }
         }
 

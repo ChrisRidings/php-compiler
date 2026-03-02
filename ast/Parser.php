@@ -273,15 +273,15 @@ class Parser
         $this->consumeTokenOfType(TokenType::T_LPAREN);
 
         // Initialization (optional) - support multiple statements separated by commas
-        $initialization = null;
+        $initializations = [];
         if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
-            // For now, we'll just skip over multiple initializations
-            $initialization = $this->parseAssignment(false);
+            // Parse first initialization
+            $initializations[] = $this->parseAssignment(false);
             while ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
                 $this->consumeToken(); // Skip comma
                 if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
-                    // Skip additional initialization statements
-                    $this->parseAssignment(false);
+                    // Parse additional initialization statements
+                    $initializations[] = $this->parseAssignment(false);
                 }
             }
         }
@@ -295,7 +295,7 @@ class Parser
         $this->consumeTokenOfType(TokenType::T_SEMICOLON);
 
         // Update (optional) - support multiple statements separated by commas
-        $update = null;
+        $updates = [];
         if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
             // Check if it's an assignment
             if ($this->currentToken()->type === TokenType::T_VARIABLE && in_array($this->peekToken()->type, [
@@ -305,16 +305,17 @@ class Parser
                 TokenType::T_ASSIGN_MULTIPLY,
                 TokenType::T_ASSIGN_DIVIDE
             ])) {
-                $update = $this->parseAssignment(false);
+                $updates[] = $this->parseAssignment(false);
             } elseif ($this->currentToken()->type === TokenType::T_VARIABLE && in_array($this->peekToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
                 // Handle $i++ or $i-- - create an assignment with += 1 or -= 1
                 $varToken = $this->consumeToken();
                 $operatorToken = $this->consumeToken();
                 $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
                 $operator = ($operatorToken->type === TokenType::T_PLUS_PLUS) ? '+=' : '-=';
-                $update = new Assignment($variable, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $varToken->line, $varToken->column);
+                $updates[] = new Assignment($variable, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $varToken->line, $varToken->column);
             } else {
-                $update = $this->parseExpression();
+                // It's an expression, wrap it in a ReturnStatement as a dummy statement
+                $updates[] = new ReturnStatement($this->parseExpression(), $this->currentToken()->line, $this->currentToken()->column);
             }
             while ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
                 $this->consumeToken(); // Skip comma
@@ -326,15 +327,16 @@ class Parser
                         TokenType::T_ASSIGN_MULTIPLY,
                         TokenType::T_ASSIGN_DIVIDE
                     ])) {
-                        $this->parseAssignment(false);
+                        $updates[] = $this->parseAssignment(false);
                     } elseif ($this->currentToken()->type === TokenType::T_VARIABLE && in_array($this->peekToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
                         $varToken = $this->consumeToken();
                         $operatorToken = $this->consumeToken();
                         $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
                         $operator = ($operatorToken->type === TokenType::T_PLUS_PLUS) ? '+=' : '-=';
-                        new Assignment($variable, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $varToken->line, $varToken->column);
+                        $updates[] = new Assignment($variable, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $varToken->line, $varToken->column);
                     } else {
-                        $this->parseExpression();
+                        // It's an expression, wrap it in a ReturnStatement as a dummy statement
+                        $updates[] = new ReturnStatement($this->parseExpression(), $this->currentToken()->line, $this->currentToken()->column);
                     }
                 }
             }
@@ -355,7 +357,7 @@ class Parser
             $body[] = $this->parseStatement();
         }
 
-        return new ForStatement($initialization, $condition, $update, $body, $forToken->line, $forToken->column);
+        return new ForStatement($initializations, $condition, $updates, $body, $forToken->line, $forToken->column);
     }
 
     private function parseIfStatement(): IfStatement
@@ -467,6 +469,10 @@ class Parser
             return $this->parseFunctionCall();
         } elseif ($token->type === TokenType::T_STRING) {
             $this->consumeToken();
+            // Check if it's a double-quoted string (starts with ")
+            if (str_starts_with($token->value, '"')) {
+                return StringLiteral::parseDoubleQuoted($token->value, $token->line, $token->column);
+            }
             return StringLiteral::fromQuotedString($token->value, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE) {
             $this->consumeToken();

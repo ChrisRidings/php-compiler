@@ -6,10 +6,16 @@ namespace PhpCompiler\AST;
 
 class ForStatement extends Statement
 {
+    /**
+     * @param Statement[] $initializations
+     * @param Expression|null $condition
+     * @param Statement[] $updates
+     * @param Statement[] $body
+     */
     public function __construct(
-        public readonly ?Statement $initialization,
+        public readonly array $initializations,
         public readonly ?Expression $condition,
-        public readonly mixed $update,
+        public readonly array $updates,
         public readonly array $body,
         int $line = 1,
         int $column = 1
@@ -19,9 +25,9 @@ class ForStatement extends Statement
 
     public function __toString(): string
     {
-        $initStr = $this->initialization ? (string)$this->initialization : '';
+        $initStr = implode(', ', array_map(fn($stmt) => (string)$stmt, $this->initializations));
         $condStr = $this->condition ? (string)$this->condition : '';
-        $updateStr = $this->update ? (string)$this->update : '';
+        $updateStr = implode(', ', array_map(fn($stmt) => (string)$stmt, $this->updates));
         $bodyStr = implode("\n", array_map(fn($stmt) => (string)$stmt, $this->body));
 
         return sprintf("for (%s; %s; %s) {\n%s\n}", $initStr, $condStr, $updateStr, $bodyStr);

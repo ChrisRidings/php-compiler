@@ -85,6 +85,15 @@ void php_echo(const char* str);
  */
 char* php_itoa(int num);
 
+/**
+ * Concatenates two strings.
+ *
+ * @param str1 First string
+ * @param str2 Second string
+ * @return Pointer to static string buffer containing the concatenated result
+ */
+char* php_concat_strings(const char* str1, const char* str2);
+
 #ifdef __cplusplus
 }
 #endif

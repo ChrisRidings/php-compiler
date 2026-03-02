@@ -4,6 +4,9 @@
 
 #include "php.h"
 
+// Thread-local buffer index for php_zval_to_string
+_Thread_local int zval_buffer_index = 0;
+
 // Zval creation functions
 void php_zval_null(zval* z) {
     z->type = PHP_TYPE_NULL;
@@ -26,9 +29,14 @@ void php_zval_string(zval* z, const char* str) {
     z->value.str_val = (char*)str;
 }
 
-// Zval conversion functions
+// Zval conversion functions - uses rotating buffers to avoid overwriting
 char* php_zval_to_string(const zval* z) {
-    static char buffer[100];
+    // Use multiple buffers to avoid overwriting during nested calls
+    static _Thread_local char buffers[8][32];
+    static _Thread_local int index = 0;
+
+    char* buffer = buffers[index];
+    index = (index + 1) % 8;
 
     switch (z->type) {
         case PHP_TYPE_NULL:
@@ -127,4 +135,26 @@ char* php_itoa(int num) {
     static char buffer[12];
     sprintf(buffer, "%d", num);
     return buffer;
+}
+
+char* php_concat_strings(const char* str1, const char* str2) {
+    // Calculate required size
+    size_t len1 = str1 ? strlen(str1) : 0;
+    size_t len2 = str2 ? strlen(str2) : 0;
+
+    // Allocate new buffer
+    char* result = (char*)malloc(len1 + len2 + 1);
+    if (!result) return NULL;
+
+    // Copy strings
+    if (str1) {
+        strcpy(result, str1);
+    } else {
+        result[0] = '\0';
+    }
+    if (str2) {
+        strcat(result, str2);
+    }
+
+    return result;
 }
