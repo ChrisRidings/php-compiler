@@ -23,6 +23,7 @@ use PhpCompiler\AST\ArrayLiteral;
 use PhpCompiler\AST\ArrayAccess;
 use PhpCompiler\AST\ArrayAssignment;
 use PhpCompiler\AST\ForeachStatement;
+use PhpCompiler\AST\ExpressionStatement;
 
 class Parser
 {
@@ -77,16 +78,16 @@ class Parser
             if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
                 $this->consumeToken();
             }
-            // Create a dummy statement to wrap the expression
-            return new ReturnStatement($call, $token->line, $token->column);
+            // Create an expression statement to wrap the function call
+            return new ExpressionStatement($call, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_ASSIGN) {
-            // Assignment statement - wrap the expression in a ReturnStatement
+            // Assignment statement - wrap the expression in an ExpressionStatement
             $assignment = $this->parseAssignment();
             // Consume semicolon if present
             if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
                 $this->consumeToken();
             }
-            return new ReturnStatement($assignment, $token->line, $token->column);
+            return new ExpressionStatement($assignment, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_LBRACKET) {
             // Array access assignment: $var[index] = value
             // We need to check if there's an assignment after the array access
@@ -102,7 +103,7 @@ class Parser
             if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
                 $this->consumeToken();
             }
-            return new ReturnStatement($assignment, $varToken->line, $varToken->column);
+            return new ExpressionStatement($assignment, $varToken->line, $varToken->column);
         } elseif ($token->type === TokenType::T_RETURN) {
             // Return statement
             return $this->parseReturnStatement();

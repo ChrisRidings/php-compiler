@@ -26,6 +26,7 @@ use PhpCompiler\AST\ArrayAccess;
 use PhpCompiler\AST\ArrayAssignment;
 use PhpCompiler\AST\ForeachStatement;
 use PhpCompiler\AST\DeclareStatement;
+use PhpCompiler\AST\ExpressionStatement;
 
 class Generator
 {
@@ -111,7 +112,9 @@ class Generator
         // Add global variables to IR
         foreach ($globalVars as $globalName => $globalData) {
             $ir[] = "; Global string constant";
-            $ir[] = "@{$globalName} = private unnamed_addr constant [{$globalData['length']} x i8] c\"{$globalData['escapedValue']}\"";
+            $ev = $globalData['escapedValue'] . '\00';
+            $evlen = $globalData['length'] + 1;
+            $ir[] = "@{$globalName} = private unnamed_addr constant [{$evlen} x i8] c\"{$ev}\"";
             $ir[] = "";
         }
 
@@ -235,6 +238,8 @@ class Generator
             foreach ($node->body as $statement) {
                 $this->collectGlobals($statement, $globalVars);
             }
+        } elseif ($node instanceof ExpressionStatement) {
+            $this->collectGlobals($node->expression, $globalVars);
         } elseif ($node instanceof ArrayLiteral) {
             foreach ($node->elements as $element) {
                 $this->collectGlobals($element, $globalVars);
@@ -301,6 +306,9 @@ class Generator
         } elseif ($statement instanceof DeclareStatement) {
             // Declare statement is a PHP runtime directive - no code generation needed
             // It's treated as a no-op since it affects PHP's runtime behavior, not compiled code
+        } elseif ($statement instanceof ExpressionStatement) {
+            // Expression statement - evaluate the expression and discard the result
+            $this->generateExpression($statement->expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -491,7 +499,7 @@ class Generator
         }
 
         foreach ($funcDef->body as $statement) {
-            $this->generateStatement($statement, $ir, $globalVars);
+            $this->generateStatement($statement, $ir, $globalVars, true);
         }
 
         $hasReturn = false;

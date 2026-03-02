@@ -16,8 +16,16 @@ spl_autoload_register(function ($className) {
         __DIR__ . '/' . $fileName,
         __DIR__ . '/../lexer/' . $fileName,
         __DIR__ . '/../llvm/' . $fileName,
-        __DIR__ . '/../lexer/Token.php',  // Special case for TokenType enum
     ];
+
+    // Handle classes in the AST namespace (e.g., ExpressionStatement -> ast/ExpressionStatement.php)
+    if ($namespace === 'PhpCompiler\AST') {
+        $paths[] = __DIR__ . '/' . $className . '.php';
+    } elseif ($namespace === 'PhpCompiler\Lexer') {
+        $paths[] = __DIR__ . '/../lexer/' . $className . '.php';
+    } elseif ($namespace === 'PhpCompiler\LLVM') {
+        $paths[] = __DIR__ . '/../llvm/' . $className . '.php';
+    }
 
     foreach ($paths as $path) {
         if (file_exists($path)) {
