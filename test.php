@@ -54,5 +54,13 @@ echo "Empty array length: " . count($empty) . "\n";
 $single = [42];
 echo "Single element array: " . $single[0] . "\n";
 
+// Nested arrays
+$nested = [
+    "numbers" => [1, 2, 3],
+    "letters" => ["a", "b", "c"]
+];
+echo "Nested array:\n";
+echo $nested["numbers"][0] . " "; // 1
+echo $nested["letters"][2] . "\n"; // c
 
 ?>
