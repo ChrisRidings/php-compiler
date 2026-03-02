@@ -10,6 +10,7 @@ require_once __DIR__ . '/../ast/Expression.php';
 require_once __DIR__ . '/../ast/Statement.php';
 require_once __DIR__ . '/../ast/StringLiteral.php';
 require_once __DIR__ . '/../ast/IntegerLiteral.php';
+require_once __DIR__ . '/../ast/BooleanLiteral.php';
 require_once __DIR__ . '/../ast/EchoStatement.php';
 require_once __DIR__ . '/../ast/ReturnStatement.php';
 require_once __DIR__ . '/../ast/BinaryOperation.php';

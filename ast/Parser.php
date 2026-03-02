@@ -13,6 +13,7 @@ use PhpCompiler\AST\Parameter;
 use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
+use PhpCompiler\AST\BooleanLiteral;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
@@ -773,10 +774,10 @@ class Parser
             return new IntegerLiteral((int)$token->value, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_TRUE) {
             $this->consumeToken();
-            return new IntegerLiteral(1, $token->line, $token->column);
+            return new BooleanLiteral(true, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_FALSE) {
             $this->consumeToken();
-            return new IntegerLiteral(0, $token->line, $token->column);
+            return new BooleanLiteral(false, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_LBRACKET) {
             // Array literal [elem1, elem2, ...]
             return $this->parseArrayLiteral();

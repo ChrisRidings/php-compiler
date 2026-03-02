@@ -15,6 +15,7 @@ use PhpCompiler\AST\FunctionCall;
 use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
+use PhpCompiler\AST\BooleanLiteral;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
@@ -258,6 +259,8 @@ class Generator
         } elseif ($node instanceof BinaryOperation) {
             $this->collectGlobals($node->left, $globalVars);
             $this->collectGlobals($node->right, $globalVars);
+        } elseif ($node instanceof BooleanLiteral) {
+            // Boolean literals don't have string constants to collect
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
@@ -851,6 +854,8 @@ class Generator
             return $this->generateVariableReference($expression, $ir, $globalVars);
         } elseif ($expression instanceof IntegerLiteral) {
             return $this->generateIntegerLiteral($expression, $ir, $globalVars);
+        } elseif ($expression instanceof BooleanLiteral) {
+            return $this->generateBooleanLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof BinaryOperation) {
             return $this->generateBinaryOperation($expression, $ir, $globalVars);
         } elseif ($expression instanceof FunctionCall) {
@@ -916,6 +921,15 @@ class Generator
         $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 " . $literal->value . ")";
         // We can't return the struct directly, but since we'll be passing pointers around,
         // return the pointer here
+        return $result;
+    }
+
+    private function generateBooleanLiteral(BooleanLiteral $literal, array &$ir, array $globalVars): string
+    {
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+        $boolVal = $literal->value ? 1 : 0;
+        $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 {$boolVal})";
         return $result;
     }
 
