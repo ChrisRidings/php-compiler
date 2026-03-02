@@ -117,6 +117,7 @@ class Generator
         $ir[] = "declare void @php_shell_exec(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_pathinfo(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_rename(%struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_unlink(%struct.zval*, %struct.zval*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -589,6 +590,9 @@ class Generator
         } elseif ($funcCall->name === 'rename') {
             $this->generateRenameFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'unlink') {
+            $this->generateUnlinkFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -859,6 +863,24 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateUnlinkFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("unlink() expects exactly 1 argument");
+        }
+
+        // Generate the filename argument
+        $filenamePtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_unlink function
+        $ir[] = "  call void @php_unlink(%struct.zval* {$filenamePtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
     private function generateArrayValuesExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -1045,6 +1067,24 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateUnlinkExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("unlink() expects exactly 1 argument");
+        }
+
+        // Generate the filename argument
+        $filenamePtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_unlink function
+        $ir[] = "  call void @php_unlink(%struct.zval* {$filenamePtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
     private function generateCountExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -1119,6 +1159,8 @@ class Generator
                 return $this->generatePathinfoExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'rename') {
                 return $this->generateRenameExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'unlink') {
+                return $this->generateUnlinkExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval

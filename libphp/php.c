@@ -890,12 +890,30 @@ void php_pathinfo(zval* path, zval* options, zval* result) {
 
     // If specific option was requested, extract just that value
     if (opts == 8) {  // PATHINFO_FILENAME only
-        // Get the filename from the array
+        // Get the filename from the array into a temp variable first
         zval index_zval;
         php_zval_string(&index_zval, "filename");
-        php_array_get(result, result, &index_zval);
+        zval temp_result;
+        php_array_get(&temp_result, result, &index_zval);
+        *result = temp_result;
         return;
     }
+}
+
+// unlink implementation - deletes a file
+void php_unlink(zval* filename, zval* result) {
+    if (filename->type != PHP_TYPE_STRING || filename->value.str_val == NULL) {
+        php_zval_bool(result, 0);  // false
+        return;
+    }
+
+    #ifdef _WIN32
+    int success = DeleteFile(filename->value.str_val);
+    #else
+    int success = (unlink(filename->value.str_val) == 0);
+    #endif
+
+    php_zval_bool(result, success ? 1 : 0);
 }
 
 // rename implementation - renames a file
@@ -924,6 +942,8 @@ void php_shell_exec(zval* cmd, zval* result) {
 
     #ifdef _WIN32
     // Windows: use _popen
+    // Note: If the executable path contains spaces, the caller should quote it
+    // e.g., shell_exec('"C:/Program Files/.../app.exe" arg1 arg2')
     FILE* fp = _popen(cmd->value.str_val, "r");
     #else
     // POSIX: use popen

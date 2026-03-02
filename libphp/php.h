@@ -264,6 +264,14 @@ void php_pathinfo(zval* path, zval* options, zval* result);
 void php_rename(zval* oldname, zval* newname, zval* result);
 
 /**
+ * Deletes a file.
+ *
+ * @param filename The file to delete
+ * @param result The result zval (will be true on success, false on failure)
+ */
+void php_unlink(zval* filename, zval* result);
+
+/**
  * Strict inequality comparison (!==).
  * Returns true if values are not identical (different types or different values).
  *
