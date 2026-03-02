@@ -22,6 +22,7 @@ class Lexer
         TokenType::T_RPAREN->value => '/^\)/',
         TokenType::T_LBRACE->value => '/^\{/',
         TokenType::T_RBRACE->value => '/^\}/',
+        TokenType::T_ASSIGN->value => '/^=/',
         TokenType::T_SEMICOLON->value => '/^;/',
         TokenType::T_WHITESPACE->value => '/^\s+/',
     ];

@@ -12,6 +12,7 @@ use PhpCompiler\AST\StringLiteral;
 use PhpCompiler\AST\FunctionDefinition;
 use PhpCompiler\AST\FunctionCall;
 use PhpCompiler\AST\VariableReference;
+use PhpCompiler\AST\Assignment;
 
 class Generator
 {
@@ -107,6 +108,8 @@ class Generator
             foreach ($node->arguments as $arg) {
                 $this->collectGlobals($arg, $globalVars);
             }
+        } elseif ($node instanceof Assignment) {
+            $this->collectGlobals($node->value, $globalVars);
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
@@ -127,6 +130,8 @@ class Generator
             $this->generateFunctionDefinition($statement, $ir, $globalVars);
         } elseif ($statement instanceof FunctionCall) {
             $this->generateFunctionCall($statement, $ir, $globalVars);
+        } elseif ($statement instanceof Assignment) {
+            $this->generateAssignment($statement, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -137,6 +142,23 @@ class Generator
                 )
             );
         }
+    }
+
+    private function generateAssignment(Assignment $assignment, array &$ir, array $globalVars): void
+    {
+        // For now, we'll treat variables as alloca'd on the stack
+        $ir[] = "  %{$assignment->variable->name} = alloca i8*";
+
+        // Generate value
+        if ($assignment->value instanceof StringLiteral) {
+            $globalName = "__str_const_" . md5($assignment->value->value);
+            $globalData = $globalVars[$globalName];
+            $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+            $ir[] = "  store i8* %{$globalName}_ptr, i8** %{$assignment->variable->name}";
+        } else {
+            $ir[] = "  store i8* null, i8** %{$assignment->variable->name}";
+        }
+        $ir[] = "";
     }
 
     private function generateFunctionDefinition(FunctionDefinition $funcDef, array &$ir, array $globalVars): void
@@ -205,10 +227,14 @@ class Generator
 
     private function generateVariableReference(VariableReference $varRef, array &$ir, array $globalVars): void
     {
-        // For now, we'll just treat variables as parameters passed by value
-        // We assume the variable name matches the parameter index
-        // So $name becomes %0 (first parameter)
-        $ir[] = "  call void @php_echo(i8* %0)";
+        // Check if variable is a parameter or local variable
+        // For now, we'll assume $name is parameter %0, others are locals
+        if ($varRef->name === 'name') {
+            $ir[] = "  call void @php_echo(i8* %0)";
+        } else {
+            $ir[] = "  %{$varRef->name}_ptr = load i8*, i8** %{$varRef->name}";
+            $ir[] = "  call void @php_echo(i8* %{$varRef->name}_ptr)";
+        }
         $ir[] = "";
     }
 

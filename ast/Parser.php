@@ -11,6 +11,7 @@ use PhpCompiler\AST\FunctionDefinition;
 use PhpCompiler\AST\FunctionCall;
 use PhpCompiler\AST\Parameter;
 use PhpCompiler\AST\VariableReference;
+use PhpCompiler\AST\Assignment;
 
 class Parser
 {
@@ -66,6 +67,9 @@ class Parser
                 $this->consumeToken();
             }
             return $call; // We'll treat function calls as statements for now
+        } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_ASSIGN) {
+            // Assignment statement
+            return $this->parseAssignment();
         }
 
         // Provide better error information
@@ -157,6 +161,20 @@ class Parser
             $nameToken->line,
             $nameToken->column
         );
+    }
+
+    private function parseAssignment(): Assignment
+    {
+        $varToken = $this->consumeToken();
+        $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
+
+        $this->consumeTokenOfType(TokenType::T_ASSIGN);
+
+        $value = $this->parseExpression();
+
+        $this->consumeTokenOfType(TokenType::T_SEMICOLON);
+
+        return new Assignment($variable, $value, $varToken->line, $varToken->column);
     }
 
     private function parseArguments(): array

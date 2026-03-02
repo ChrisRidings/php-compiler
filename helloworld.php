@@ -1,8 +1,9 @@
 <?php
-function say_hello($name) {
-    echo "Hello, ";
+function greet($name) {
+    $greeting = "Yo there, ";
+    echo $greeting;
     echo $name;
     echo "!";
 }
 
-say_hello("Alice");
+greet("Alice");

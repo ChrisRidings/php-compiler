@@ -21,6 +21,7 @@ enum TokenType: int
     case T_NEWLINE = 13;
     case T_VARIABLE = 14;
     case T_DOLLAR = 15;
+    case T_ASSIGN = 16;
 }
 
 class Token
