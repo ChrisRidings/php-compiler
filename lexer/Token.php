@@ -24,6 +24,10 @@ enum TokenType: int
     case T_ASSIGN = 16;
     case T_INTEGER = 17;
     case T_RETURN = 18;
+    case T_PLUS = 19;
+    case T_MINUS = 20;
+    case T_MULTIPLY = 21;
+    case T_DIVIDE = 22;
 }
 
 class Token

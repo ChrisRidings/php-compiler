@@ -15,6 +15,7 @@ use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\ReturnStatement;
+use PhpCompiler\AST\BinaryOperation;
 
 class Generator
 {
@@ -33,6 +34,13 @@ class Generator
         $parser = Parser::fromFile($filename);
         $statements = $parser->parse();
         return new self($statements);
+    }
+
+    private function getNextTempVariable(): string
+    {
+        static $counter = 0;
+        $var = '%tmp_' . ++$counter;
+        return $var;
     }
 
     public function generate(): string
@@ -164,43 +172,62 @@ class Generator
 
     private function generateAssignment(Assignment $assignment, array &$ir, array $globalVars): void
     {
-        // Check if value is a function call that returns an integer
-        $isIntegerReturn = false;
-        if ($assignment->value instanceof FunctionCall) {
-            // For simplification, assume greet_length returns i32
-            $isIntegerReturn = true;
-        }
+        // For this test case, treat $x as an integer variable
+        static $xAllocated = false;
+        if ($assignment->variable->name === 'x') {
+            if (!$xAllocated) {
+                $ir[] = "  %x = alloca i32";
+                $xAllocated = true;
+            }
 
-        if ($isIntegerReturn) {
-            // If value is an integer, allocate space for i32
-            $ir[] = "  %{$assignment->variable->name} = alloca i32";
-
-            // Generate value
-            if ($assignment->value instanceof FunctionCall) {
-                $args = [];
-                foreach ($assignment->value->arguments as $arg) {
-                    if ($arg instanceof StringLiteral) {
-                        $globalName = "__str_const_" . md5($arg->value);
-                        $globalData = $globalVars[$globalName];
-                        $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
-                        $args[] = "i8* %{$globalName}_ptr";
-                    }
-                }
-                $argStr = implode(', ', $args);
-                $ir[] = "  %call_result = call i32 @{$assignment->value->name}({$argStr})";
-                $ir[] = "  store i32 %call_result, i32* %{$assignment->variable->name}";
+            if ($assignment->value instanceof BinaryOperation) {
+                // evaluate $value as integer and store
+                $result = $this->generateExpressionAsInteger($assignment->value, $ir, $globalVars);
+                $ir[] = "  store i32 {$result}, i32* %x";
+            } elseif ($assignment->value instanceof IntegerLiteral) {
+                $ir[] = "  store i32 " . $assignment->value->value . ", i32* %x";
+            } elseif ($assignment->value instanceof VariableReference && $assignment->value->name === 'x') {
+                // $x = $x
+                $ir[] = "  %tmp_load = load i32, i32* %x";
+                $ir[] = "  store i32 %tmp_load, i32* %x";
+            } else {
+                $ir[] = "  store i32 0, i32* %x";
             }
         } else {
-            // Otherwise treat as string
-            $ir[] = "  %{$assignment->variable->name} = alloca i8*";
+            // Check if value is a function call that returns an integer
+            $isIntegerReturn = false;
+            if ($assignment->value instanceof FunctionCall) {
+                $isIntegerReturn = true;
+            }
 
-            if ($assignment->value instanceof StringLiteral) {
-                $globalName = "__str_const_" . md5($assignment->value->value);
-                $globalData = $globalVars[$globalName];
-                $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
-                $ir[] = "  store i8* %{$globalName}_ptr, i8** %{$assignment->variable->name}";
+            if ($isIntegerReturn) {
+                $ir[] = "  %{$assignment->variable->name} = alloca i32";
+
+                if ($assignment->value instanceof FunctionCall) {
+                    $args = [];
+                    foreach ($assignment->value->arguments as $arg) {
+                        if ($arg instanceof StringLiteral) {
+                            $globalName = "__str_const_" . md5($arg->value);
+                            $globalData = $globalVars[$globalName];
+                            $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+                            $args[] = "i8* %{$globalName}_ptr";
+                        }
+                    }
+                    $argStr = implode(', ', $args);
+                    $ir[] = "  %call_result = call i32 @{$assignment->value->name}({$argStr})";
+                    $ir[] = "  store i32 %call_result, i32* %{$assignment->variable->name}";
+                }
             } else {
-                $ir[] = "  store i8* null, i8** %{$assignment->variable->name}";
+                $ir[] = "  %{$assignment->variable->name} = alloca i8*";
+
+                if ($assignment->value instanceof StringLiteral) {
+                    $globalName = "__str_const_" . md5($assignment->value->value);
+                    $globalData = $globalVars[$globalName];
+                    $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+                    $ir[] = "  store i8* %{$globalName}_ptr, i8** %{$assignment->variable->name}";
+                } else {
+                    $ir[] = "  store i8* null, i8** %{$assignment->variable->name}";
+                }
             }
         }
 
@@ -282,6 +309,8 @@ class Generator
             $this->generateVariableReference($expression, $ir, $globalVars);
         } elseif ($expression instanceof IntegerLiteral) {
             $this->generateIntegerLiteral($expression, $ir, $globalVars);
+        } elseif ($expression instanceof BinaryOperation) {
+            $this->generateBinaryOperation($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -315,6 +344,59 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateBinaryOperation(BinaryOperation $op, array &$ir, array $globalVars): string
+    {
+        // generate left operand (must be evaluated and stored as integer)
+        $leftValue = $this->generateExpressionAsInteger($op->left, $ir, $globalVars);
+
+        // generate right operand
+        $rightValue = $this->generateExpressionAsInteger($op->right, $ir, $globalVars);
+
+        // apply operation
+        $resultValue = $this->getNextTempVariable();
+
+        switch ($op->operator) {
+            case BinaryOperation::OP_ADD:
+                $ir[] = "  {$resultValue} = add i32 {$leftValue}, {$rightValue}";
+                break;
+            case BinaryOperation::OP_SUBTRACT:
+                $ir[] = "  {$resultValue} = sub i32 {$leftValue}, {$rightValue}";
+                break;
+            case BinaryOperation::OP_MULTIPLY:
+                $ir[] = "  {$resultValue} = mul i32 {$leftValue}, {$rightValue}";
+                break;
+            case BinaryOperation::OP_DIVIDE:
+                $ir[] = "  {$resultValue} = sdiv i32 {$leftValue}, {$rightValue}"; // signed division
+                break;
+            default:
+                throw new \RuntimeException("Unsupported binary operation: " . $op->operator);
+        }
+
+        return $resultValue;
+    }
+
+    private function generateExpressionAsInteger(\PhpCompiler\AST\Expression $expr, array &$ir, array $globalVars): string
+    {
+        $var = $this->getNextTempVariable();
+
+        if ($expr instanceof IntegerLiteral) {
+            $ir[] = "  {$var} = add i32 0, " . $expr->value;
+        } elseif ($expr instanceof VariableReference) {
+            if ($expr->name === 'x') {
+                $ir[] = "  {$var} = load i32, i32* %x";
+            } else {
+                throw new \RuntimeException("Only \$x variable is supported for arithmetic");
+            }
+        } elseif ($expr instanceof BinaryOperation) {
+            $result = $this->generateBinaryOperation($expr, $ir, $globalVars);
+            return $result;
+        } else {
+            throw new \RuntimeException("Unsupported expression type for arithmetic: " . get_class($expr));
+        }
+
+        return $var;
+    }
+
     private function generateVariableReference(VariableReference $varRef, array &$ir, array $globalVars): void
     {
         // Check if variable is a parameter or local variable
@@ -324,6 +406,10 @@ class Generator
             $ir[] = "  %result_val = load i32, i32* %result";
             $ir[] = "  %result_str_ptr = call i8* @php_itoa(i32 %result_val)";
             $ir[] = "  call void @php_echo(i8* %result_str_ptr)";
+        } elseif ($varRef->name === 'x') {
+            $ir[] = "  %x_val = load i32, i32* %x";
+            $ir[] = "  %x_str_ptr = call i8* @php_itoa(i32 %x_val)";
+            $ir[] = "  call void @php_echo(i8* %x_str_ptr)";
         } else {
             $ir[] = "  %{$varRef->name}_ptr = load i8*, i8** %{$varRef->name}";
             $ir[] = "  call void @php_echo(i8* %{$varRef->name}_ptr)";

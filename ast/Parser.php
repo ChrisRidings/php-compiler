@@ -14,6 +14,7 @@ use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\ReturnStatement;
+use PhpCompiler\AST\BinaryOperation;
 
 class Parser
 {
@@ -192,9 +193,11 @@ class Parser
 
         $this->consumeTokenOfType(TokenType::T_ASSIGN);
 
-        $value = $this->parseExpression();
+        $value = $this->parseExpression(); // parse the entire expression (left to right with precedence)
 
-        $this->consumeTokenOfType(TokenType::T_SEMICOLON);
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+            $this->consumeToken();
+        }
 
         return new Assignment($variable, $value, $varToken->line, $varToken->column);
     }
@@ -251,14 +254,49 @@ class Parser
 
     private function parseExpression(): Expression
     {
+        $expression = $this->parseTerm();
+
+        while ($this->currentToken() && in_array($this->currentToken()->type, [TokenType::T_PLUS, TokenType::T_MINUS])) {
+            $operatorToken = $this->consumeToken();
+            $operator = match ($operatorToken->type) {
+                TokenType::T_PLUS => BinaryOperation::OP_ADD,
+                TokenType::T_MINUS => BinaryOperation::OP_SUBTRACT,
+                default => throw new \RuntimeException("Unexpected operator at " . $operatorToken->line . ":" . $operatorToken->column),
+            };
+            $right = $this->parseTerm();
+            $expression = new BinaryOperation($expression, $operator, $right, $operatorToken->line, $operatorToken->column);
+        }
+
+        return $expression;
+    }
+
+    private function parseTerm(): Expression
+    {
+        $term = $this->parsePrimary();
+
+        while ($this->currentToken() && in_array($this->currentToken()->type, [TokenType::T_MULTIPLY, TokenType::T_DIVIDE])) {
+            $operatorToken = $this->consumeToken();
+            $operator = match ($operatorToken->type) {
+                TokenType::T_MULTIPLY => BinaryOperation::OP_MULTIPLY,
+                TokenType::T_DIVIDE => BinaryOperation::OP_DIVIDE,
+                default => throw new \RuntimeException("Unexpected operator at " . $operatorToken->line . ":" . $operatorToken->column),
+            };
+            $right = $this->parsePrimary();
+            $term = new BinaryOperation($term, $operator, $right, $operatorToken->line, $operatorToken->column);
+        }
+
+        return $term;
+    }
+
+    private function parsePrimary(): Expression
+    {
         $token = $this->currentToken();
 
         if ($token === null) {
-            throw new \RuntimeException("Unexpected end of input when parsing expression");
+            throw new \RuntimeException("Unexpected end of input when parsing primary expression");
         }
 
         if ($token->type === TokenType::T_IDENTIFIER && $this->peekToken() && $this->peekToken()->type === TokenType::T_LPAREN) {
-            // Function call as expression
             return $this->parseFunctionCall();
         } elseif ($token->type === TokenType::T_STRING) {
             $this->consumeToken();

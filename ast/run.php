@@ -12,6 +12,7 @@ require_once __DIR__ . '/StringLiteral.php';
 require_once __DIR__ . '/IntegerLiteral.php';
 require_once __DIR__ . '/EchoStatement.php';
 require_once __DIR__ . '/ReturnStatement.php';
+require_once __DIR__ . '/BinaryOperation.php';
 require_once __DIR__ . '/Parameter.php';
 require_once __DIR__ . '/FunctionDefinition.php';
 require_once __DIR__ . '/FunctionCall.php';
