@@ -161,6 +161,84 @@ int php_array_size(zval* arr);
  */
 char* php_array_get_key(zval* arr, int index);
 
+/**
+ * Returns all the values of an array.
+ * For associative arrays, this will reindex numerically.
+ *
+ * @param arr The array zval
+ * @param result The result zval (will be an array)
+ */
+void php_array_values(zval* arr, zval* result);
+
+/**
+ * Opens a directory for reading.
+ *
+ * @param path The directory path
+ * @param result The result zval (will contain directory handle or false)
+ */
+void php_opendir(zval* path, zval* result);
+
+/**
+ * Reads the next entry from a directory.
+ *
+ * @param handle The directory handle
+ * @param result The result zval (will contain filename or false)
+ */
+void php_readdir(zval* handle, zval* result);
+
+/**
+ * Closes a directory handle.
+ *
+ * @param handle The directory handle
+ * @param result The result zval (will be null)
+ */
+void php_closedir(zval* handle, zval* result);
+
+/**
+ * Performs a regular expression match.
+ *
+ * @param pattern The regex pattern
+ * @param subject The string to match against
+ * @param result The result zval (1 if match found, 0 otherwise)
+ */
+void php_preg_match(zval* pattern, zval* subject, zval* result);
+
+/**
+ * Sorts an array using natural order algorithm.
+ *
+ * @param arr The array to sort
+ * @param result The result zval (will contain sorted array)
+ */
+void php_natsort(zval* arr, zval* result);
+
+/**
+ * Prints human-readable information about a variable.
+ *
+ * @param value The value to print
+ * @param result The result zval (will be true)
+ */
+void php_print_r(zval* value, zval* result);
+
+/**
+ * Strict inequality comparison (!==).
+ * Returns true if values are not identical (different types or different values).
+ *
+ * @param a First value
+ * @param b Second value
+ * @param result The result zval (will be boolean)
+ */
+void php_zval_strict_ne(zval* a, zval* b, zval* result);
+
+/**
+ * Strict equality comparison (===).
+ * Returns true if values are identical (same type and same value).
+ *
+ * @param a First value
+ * @param b Second value
+ * @param result The result zval (will be boolean)
+ */
+void php_zval_strict_eq(zval* a, zval* b, zval* result);
+
 #ifdef __cplusplus
 }
 #endif

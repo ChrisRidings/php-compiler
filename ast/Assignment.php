@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace PhpCompiler\AST;
 
-class Assignment extends Statement
+class Assignment extends Expression
 {
     public function __construct(
         public VariableReference $variable,

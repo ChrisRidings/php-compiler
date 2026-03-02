@@ -92,6 +92,15 @@ class Generator
         $ir[] = "declare void @php_array_set_by_index(%struct.zval*, i32, %struct.zval*)";
         $ir[] = "declare i32 @php_array_size(%struct.zval*)";
         $ir[] = "declare i8* @php_array_get_key(%struct.zval*, i32)";
+        $ir[] = "declare void @php_array_values(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_preg_match(%struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_natsort(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_print_r(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_zval_strict_ne(%struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_zval_strict_eq(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -102,7 +111,7 @@ class Generator
         // Add global variables to IR
         foreach ($globalVars as $globalName => $globalData) {
             $ir[] = "; Global string constant";
-            $ir[] = "@{$globalName} = private unnamed_addr constant [{$globalData['length']} x i8] c\"{$globalData['escapedValue']}\\00\"";
+            $ir[] = "@{$globalName} = private unnamed_addr constant [{$globalData['length']} x i8] c\"{$globalData['escapedValue']}\"";
             $ir[] = "";
         }
 
@@ -139,10 +148,12 @@ class Generator
                     $args[] = "%struct.zval {$argVal}";
                 }
                 $argStr = implode(', ', $args);
-                $ir[] = "  %call_result = call %struct.zval @{$statement->name}({$argStr})";
+                $callResult = $this->getNextTempVariable();
+                $ir[] = "  {$callResult} = call %struct.zval @{$statement->name}({$argStr})";
                 // Discard the result - store in stack space and then do nothing
-                $ir[] = "  %result_ptr = alloca %struct.zval";
-                $ir[] = "  store %struct.zval %call_result, %struct.zval* %result_ptr";
+                $resultPtr = $this->getNextTempVariable();
+                $ir[] = "  {$resultPtr} = alloca %struct.zval";
+                $ir[] = "  store %struct.zval {$callResult}, %struct.zval* {$resultPtr}";
             } elseif ($statement instanceof ReturnStatement) {
                 // If it's a return statement at top level, we need to handle it specially
                 // because main must return i32, not zval
@@ -150,6 +161,8 @@ class Generator
                     // Generate the expression and then ignore it (we'll return 0 anyway)
                     $this->generateExpression($statement->value, $ir, $globalVars);
                 }
+                // Skip further processing - don't call generateStatement which would emit a ret
+                continue;
             } else {
                 $this->generateStatement($statement, $ir, $globalVars);
             }
@@ -234,7 +247,9 @@ class Generator
             }
         } elseif ($node instanceof ArrayAccess) {
             $this->collectGlobals($node->array, $globalVars);
-            $this->collectGlobals($node->index, $globalVars);
+            if ($node->index !== null) {
+                $this->collectGlobals($node->index, $globalVars);
+            }
         } elseif ($node instanceof BinaryOperation) {
             $this->collectGlobals($node->left, $globalVars);
             $this->collectGlobals($node->right, $globalVars);
@@ -245,7 +260,7 @@ class Generator
                 $globalVars[$globalName] = [
                 'value' => $node->value,
                 'escapedValue' => $escapedValue,
-                'length' => strlen($escapedValue) + 1 // +1 for null terminator
+                'length' => strlen($node->value)
             ];
             }
         }
@@ -259,7 +274,7 @@ class Generator
         }
     }
 
-    private function generateStatement(Statement $statement, array &$ir, array $globalVars): void
+    private function generateStatement(Statement $statement, array &$ir, array $globalVars, bool $inFunction = false): void
     {
         if ($statement instanceof EchoStatement) {
             $this->generateEchoStatement($statement, $ir, $globalVars);
@@ -272,17 +287,17 @@ class Generator
         } elseif ($statement instanceof ArrayAssignment) {
             $this->generateArrayAssignment($statement, $ir, $globalVars);
         } elseif ($statement instanceof ReturnStatement) {
-            $this->generateReturnStatement($statement, $ir, $globalVars);
+            $this->generateReturnStatement($statement, $ir, $globalVars, $inFunction);
         } elseif ($statement instanceof IfStatement) {
-            $this->generateIfStatement($statement, $ir, $globalVars);
+            $this->generateIfStatement($statement, $ir, $globalVars, $inFunction);
         } elseif ($statement instanceof ForStatement) {
-            $this->generateForStatement($statement, $ir, $globalVars);
+            $this->generateForStatement($statement, $ir, $globalVars, $inFunction);
         } elseif ($statement instanceof WhileStatement) {
-            $this->generateWhileStatement($statement, $ir, $globalVars);
+            $this->generateWhileStatement($statement, $ir, $globalVars, $inFunction);
         } elseif ($statement instanceof DoWhileStatement) {
-            $this->generateDoWhileStatement($statement, $ir, $globalVars);
+            $this->generateDoWhileStatement($statement, $ir, $globalVars, $inFunction);
         } elseif ($statement instanceof ForeachStatement) {
-            $this->generateForeachStatement($statement, $ir, $globalVars);
+            $this->generateForeachStatement($statement, $ir, $globalVars, $inFunction);
         } elseif ($statement instanceof DeclareStatement) {
             // Declare statement is a PHP runtime directive - no code generation needed
             // It's treated as a no-op since it affects PHP's runtime behavior, not compiled code
@@ -298,8 +313,18 @@ class Generator
         }
     }
 
-    private function generateReturnStatement(ReturnStatement $returnStmt, array &$ir, array $globalVars): void
+    private function generateReturnStatement(ReturnStatement $returnStmt, array &$ir, array $globalVars, bool $inFunction = false): void
     {
+        // If this ReturnStatement is being used as an expression statement wrapper
+        // at the top level (not inside a function), just evaluate the expression without returning
+        // The parser wraps expression-statements in ReturnStatements, so at top level
+        // we should just evaluate the expression, not actually return
+        if (!$inFunction && $returnStmt->value !== null) {
+            // Just evaluate the expression, don't return
+            $this->generateExpression($returnStmt->value, $ir, $globalVars);
+            return;
+        }
+
         // Always return a zval
         if ($returnStmt->value === null) {
             $nullResult = $this->getNextTempVariable();
@@ -366,19 +391,75 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateAssignmentExpression(Assignment $assignment, array &$ir, array $globalVars): string
+    {
+        // All variables are stored as zval structs on the stack
+        $varName = $assignment->variable->name;
+
+        // Check if variable is already declared - if not, declare it
+        if (!isset($this->declaredVars[$varName])) {
+            $ir[] = "  %{$varName} = alloca %struct.zval";
+            $this->declaredVars[$varName] = true;
+        }
+
+        // Generate the value expression
+        $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+
+        if ($assignment->operator === '=') {
+            // Simple assignment
+            $value = $this->getNextTempVariable();
+            $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
+            $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
+        } else {
+            // Compound assignment (+=, -=, *=, /=)
+            $currentVal = $this->getNextTempVariable();
+            $ir[] = "  {$currentVal} = call i32 @php_zval_to_int(%struct.zval* %{$varName})";
+
+            $valueVal = $this->getNextTempVariable();
+            $ir[] = "  {$valueVal} = call i32 @php_zval_to_int(%struct.zval* {$valuePtr})";
+
+            $resultVal = $this->getNextTempVariable();
+            switch ($assignment->operator) {
+                case '+=':
+                    $ir[] = "  {$resultVal} = add i32 {$currentVal}, {$valueVal}";
+                    break;
+                case '-=':
+                    $ir[] = "  {$resultVal} = sub i32 {$currentVal}, {$valueVal}";
+                    break;
+                case '*=':
+                    $ir[] = "  {$resultVal} = mul i32 {$currentVal}, {$valueVal}";
+                    break;
+                case '/=':
+                    $ir[] = "  {$resultVal} = sdiv i32 {$currentVal}, {$valueVal}";
+                    break;
+            }
+
+            $ir[] = "  call void @php_zval_int(%struct.zval* %{$varName}, i32 {$resultVal})";
+        }
+
+        // Return a pointer to the assigned value (for use in parent expressions)
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $loadedVal = $this->getNextTempVariable();
+        $ir[] = "  {$loadedVal} = load %struct.zval, %struct.zval* %{$varName}";
+        $ir[] = "  store %struct.zval {$loadedVal}, %struct.zval* {$resultPtr}";
+
+        return $resultPtr;
+    }
+
     private function generateArrayAssignment(ArrayAssignment $arrayAssignment, array &$ir, array $globalVars): void
     {
         // Get the array pointer
         $arrayPtr = $this->generateExpression($arrayAssignment->arrayAccess->array, $ir, $globalVars);
 
-        // Get the index pointer
-        $indexPtr = $this->generateExpression($arrayAssignment->arrayAccess->index, $ir, $globalVars);
-
         // Get the value pointer
         $valuePtr = $this->generateExpression($arrayAssignment->value, $ir, $globalVars);
 
-        // Check if the index is a string literal (associative array assignment)
-        if ($arrayAssignment->arrayAccess->index instanceof StringLiteral) {
+        // Check if this is an array push (null index) or indexed assignment
+        if ($arrayAssignment->arrayAccess->index === null) {
+            // Array push - use php_array_append
+            $ir[] = "  call void @php_array_append(%struct.zval* {$arrayPtr}, %struct.zval* {$valuePtr})";
+        } elseif ($arrayAssignment->arrayAccess->index instanceof StringLiteral) {
             // For string keys, use php_array_set
             $globalName = "__str_const_" . md5($arrayAssignment->arrayAccess->index->value);
             $globalData = $globalVars[$globalName];
@@ -387,6 +468,7 @@ class Generator
             $ir[] = "  call void @php_array_set(%struct.zval* {$arrayPtr}, i8* {$keyPtr}, %struct.zval* {$valuePtr})";
         } else {
             // For numeric keys, use php_array_set_by_index
+            $indexPtr = $this->generateExpression($arrayAssignment->arrayAccess->index, $ir, $globalVars);
             $indexInt = $this->getNextTempVariable();
             $ir[] = "  {$indexInt} = call i32 @php_zval_to_int(%struct.zval* {$indexPtr})";
             $ir[] = "  call void @php_array_set_by_index(%struct.zval* {$arrayPtr}, i32 {$indexInt}, %struct.zval* {$valuePtr})";
@@ -439,6 +521,27 @@ class Generator
         if ($funcCall->name === 'count') {
             $this->generateCountFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_values') {
+            $this->generateArrayValuesFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'opendir') {
+            $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'readdir') {
+            $this->generateReaddirFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'closedir') {
+            $this->generateClosedirFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'preg_match') {
+            $this->generatePregMatchFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'natsort') {
+            $this->generateNatsortFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'print_r') {
+            $this->generatePrintRFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -473,6 +576,233 @@ class Generator
         $ir[] = "  {$resultPtr} = alloca %struct.zval";
         $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$countResult})";
         $ir[] = "";
+    }
+
+    private function generateArrayValuesFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("array_values() expects exactly 1 argument");
+        }
+
+        // Generate the array argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_values function
+        $ir[] = "  call void @php_array_values(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateOpendirFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("opendir() expects exactly 1 argument");
+        }
+
+        // Generate the path argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_opendir function
+        $ir[] = "  call void @php_opendir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateReaddirFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("readdir() expects exactly 1 argument");
+        }
+
+        // Generate the handle argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_readdir function
+        $ir[] = "  call void @php_readdir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateClosedirFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("closedir() expects exactly 1 argument");
+        }
+
+        // Generate the handle argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_closedir function
+        $ir[] = "  call void @php_closedir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generatePregMatchFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("preg_match() expects exactly 2 arguments, got " . count($funcCall->arguments));
+        }
+
+        // Generate the pattern argument
+        $patternPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the subject argument
+        $subjectPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_preg_match function
+        $ir[] = "  call void @php_preg_match(%struct.zval* {$patternPtr}, %struct.zval* {$subjectPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateNatsortFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("natsort() expects exactly 1 argument");
+        }
+
+        // Generate the array argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_natsort function
+        $ir[] = "  call void @php_natsort(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generatePrintRFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("print_r() expects exactly 1 argument");
+        }
+
+        // Generate the value argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_print_r function
+        $ir[] = "  call void @php_print_r(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayValuesExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("array_values() expects exactly 1 argument");
+        }
+
+        // Generate the array argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_values function
+        $ir[] = "  call void @php_array_values(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
+    private function generateOpendirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("opendir() expects exactly 1 argument");
+        }
+
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_opendir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
+    private function generateReaddirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("readdir() expects exactly 1 argument");
+        }
+
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_readdir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
+    private function generateClosedirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("closedir() expects exactly 1 argument");
+        }
+
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_closedir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
+    private function generatePregMatchExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("preg_match() expects exactly 2 arguments");
+        }
+
+        $patternPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $subjectPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_preg_match(%struct.zval* {$patternPtr}, %struct.zval* {$subjectPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
+    private function generateNatsortExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("natsort() expects exactly 1 argument");
+        }
+
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_natsort(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
+    private function generatePrintRExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("print_r() expects exactly 1 argument");
+        }
+
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_print_r(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
     }
 
     private function generateCountExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
@@ -519,6 +849,20 @@ class Generator
             // Handle builtin functions specially
             if ($expression->name === 'count') {
                 return $this->generateCountExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_values') {
+                return $this->generateArrayValuesExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'opendir') {
+                return $this->generateOpendirExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'readdir') {
+                return $this->generateReaddirExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'closedir') {
+                return $this->generateClosedirExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'preg_match') {
+                return $this->generatePregMatchExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'natsort') {
+                return $this->generateNatsortExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'print_r') {
+                return $this->generatePrintRExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval
@@ -534,14 +878,17 @@ class Generator
             }
 
             $argStr = implode(', ', $args);
-            $ir[] = "  %call_result = call %struct.zval @{$expression->name}({$argStr})";
-            $ir[] = "  store %struct.zval %call_result, %struct.zval* {$result}";
+            $callResult = $this->getNextTempVariable();
+            $ir[] = "  {$callResult} = call %struct.zval @{$expression->name}({$argStr})";
+            $ir[] = "  store %struct.zval {$callResult}, %struct.zval* {$result}";
 
             return $result;
         } elseif ($expression instanceof ArrayLiteral) {
             return $this->generateArrayLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof ArrayAccess) {
             return $this->generateArrayAccess($expression, $ir, $globalVars);
+        } elseif ($expression instanceof Assignment) {
+            return $this->generateAssignmentExpression($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -652,6 +999,15 @@ class Generator
                 $cmpBool = $this->getNextTempVariable();
                 $ir[] = "  {$cmpBool} = zext i1 {$compareResult} to i32";
                 $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 {$cmpBool})";
+                break;
+            case '===':
+            case '!==':
+                // Strict comparison - use helper functions that check type and value
+                if ($op->operator === '===') {
+                    $ir[] = "  call void @php_zval_strict_eq(%struct.zval* {$leftZval}, %struct.zval* {$rightZval}, %struct.zval* {$result})";
+                } else {
+                    $ir[] = "  call void @php_zval_strict_ne(%struct.zval* {$leftZval}, %struct.zval* {$rightZval}, %struct.zval* {$result})";
+                }
                 break;
             default:
                 throw new \RuntimeException("Unsupported binary operation: " . $op->operator);
@@ -831,7 +1187,7 @@ class Generator
         $ir[] = "";
     }
 
-    private function generateForeachStatement(ForeachStatement $foreachStmt, array &$ir, array $globalVars): void
+    private function generateForeachStatement(ForeachStatement $foreachStmt, array &$ir, array $globalVars, bool $inFunction = false): void
     {
         // Create basic blocks for foreach loop
         static $blockCounter = 0;
@@ -932,7 +1288,7 @@ class Generator
 
         // Generate body statements
         foreach ($foreachStmt->body as $statement) {
-            $this->generateStatement($statement, $ir, $globalVars);
+            $this->generateStatement($statement, $ir, $globalVars, $inFunction);
         }
 
         // Increment index
@@ -948,7 +1304,7 @@ class Generator
         $ir[] = "";
     }
 
-    private function generateIfStatement(IfStatement $ifStmt, array &$ir, array $globalVars): void
+    private function generateIfStatement(IfStatement $ifStmt, array &$ir, array $globalVars, bool $inFunction = false): void
     {
         // Generate condition
         $conditionPtr = $this->generateExpression($ifStmt->condition, $ir, $globalVars);
@@ -1082,12 +1438,20 @@ class Generator
         // Generate the array expression first
         $arrayPtr = $this->generateExpression($arrayAccess->array, $ir, $globalVars);
 
-        // Generate the index expression
-        $indexPtr = $this->generateExpression($arrayAccess->index, $ir, $globalVars);
-
         // Allocate result zval
         $result = $this->getNextTempVariable();
         $ir[] = "  {$result} = alloca %struct.zval";
+
+        // Check if this is an array push access (null index) - shouldn't happen in read context
+        // but we handle it gracefully
+        if ($arrayAccess->index === null) {
+            // For null index in read context, return the array itself
+            // This is a fallback - ideally array push should only be used in assignment
+            return $arrayPtr;
+        }
+
+        // Generate the index expression
+        $indexPtr = $this->generateExpression($arrayAccess->index, $ir, $globalVars);
 
         // Call runtime function to get array element
         $ir[] = "  call void @php_array_get(%struct.zval* {$result}, %struct.zval* {$arrayPtr}, %struct.zval* {$indexPtr})";
@@ -1100,12 +1464,12 @@ class Generator
         $replacements = [
             '\\' => '\\\\',
             '"' => '\\"',
-            "\n" => '\\n',
-            "\r" => '\\r',
-            "\t" => '\\t',
-            "\0" => '\\0',
-            "\b" => '\\b',
-            "\f" => '\\f',
+            '\n' => '\\n',
+            '\r' => '\\r',
+            '\t' => '\\t',
+            '\0' => '\\0',
+            '\b' => '\\b',
+            '\f' => '\\f',
         ];
 
         return strtr($str, $replacements);
@@ -1113,8 +1477,9 @@ class Generator
 
     private function getStringLengthForLLVM(string $str): int
     {
-        // Calculate length of string when escaped for LLVM
-        $escaped = $this->escapeString($str);
-        return strlen($escaped) + 1; // +1 for null terminator
+        // Calculate length of the escaped string content (including escape sequences like \n)
+        // but not the null terminator - we'll add that separately in generate()
+        $escapedStr = $this->escapeString($str);
+        return strlen($escapedStr) + 1; // +1 for null terminator
     }
 }

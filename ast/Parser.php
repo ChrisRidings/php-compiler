@@ -80,8 +80,13 @@ class Parser
             // Create a dummy statement to wrap the expression
             return new ReturnStatement($call, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_ASSIGN) {
-            // Assignment statement
-            return $this->parseAssignment();
+            // Assignment statement - wrap the expression in a ReturnStatement
+            $assignment = $this->parseAssignment();
+            // Consume semicolon if present
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+                $this->consumeToken();
+            }
+            return new ReturnStatement($assignment, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_LBRACKET) {
             // Array access assignment: $var[index] = value
             // We need to check if there's an assignment after the array access
@@ -92,11 +97,12 @@ class Parser
             $operatorToken = $this->consumeToken();
             $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
             $operator = ($operatorToken->type === TokenType::T_PLUS_PLUS) ? '+=' : '-=';
+            $assignment = new Assignment($variable, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $varToken->line, $varToken->column);
             // Consume semicolon if present
             if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
                 $this->consumeToken();
             }
-            return new Assignment($variable, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $varToken->line, $varToken->column);
+            return new ReturnStatement($assignment, $varToken->line, $varToken->column);
         } elseif ($token->type === TokenType::T_RETURN) {
             // Return statement
             return $this->parseReturnStatement();
@@ -262,15 +268,54 @@ class Parser
         return new Assignment($variable, $operator, $value, $varToken->line, $varToken->column);
     }
 
+    private function parseAssignmentExpression(): Assignment
+    {
+        $varToken = $this->consumeToken();
+        $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
+
+        $opToken = $this->currentToken();
+        $operator = '';
+        if ($opToken->type === TokenType::T_ASSIGN) {
+            $operator = '=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_PLUS) {
+            $operator = '+=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_MINUS) {
+            $operator = '-=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_MULTIPLY) {
+            $operator = '*=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_DIVIDE) {
+            $operator = '/=';
+            $this->consumeToken();
+        } else {
+            throw new \RuntimeException("Expected assignment operator at line {$opToken->line}, column {$opToken->column}");
+        }
+
+        $value = $this->parseExpression();
+
+        return new Assignment($variable, $operator, $value, $varToken->line, $varToken->column);
+    }
+
     private function parseArrayAssignment(): ArrayAssignment
     {
-        // Parse the array access: $var[index]
+        // Parse the array access: $var[index] or $var[] for array push
         $varToken = $this->consumeToken(); // Consume variable
         $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
 
         $this->consumeTokenOfType(TokenType::T_LBRACKET); // Consume [
-        $index = $this->parseExpression();
-        $this->consumeTokenOfType(TokenType::T_RBRACKET); // Consume ]
+
+        // Check for empty brackets (array push syntax)
+        $index = null;
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_RBRACKET) {
+            // Empty [] - consume the ]
+            $this->consumeToken();
+        } else {
+            $index = $this->parseExpression();
+            $this->consumeTokenOfType(TokenType::T_RBRACKET); // Consume ]
+        }
 
         $arrayAccess = new ArrayAccess($variable, $index, $varToken->line, $varToken->column);
 
@@ -314,10 +359,12 @@ class Parser
             // Parse first argument
             $arguments[] = $this->parseExpression();
 
-            // Parse additional arguments
-            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
-                // Skip any other token types for now
-                $this->consumeToken();
+            // Parse additional arguments separated by commas
+            while ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
+                $this->consumeToken(); // Consume comma
+                if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
+                    $arguments[] = $this->parseExpression();
+                }
             }
         }
 
@@ -621,6 +668,8 @@ class Parser
             TokenType::T_LESS_EQUAL,
             TokenType::T_EQUAL,
             TokenType::T_NOT_EQUAL,
+            TokenType::T_IDENTICAL,
+            TokenType::T_NOT_IDENTICAL,
             TokenType::T_CONCAT
         ])) {
             $operatorToken = $this->consumeToken();
@@ -633,6 +682,8 @@ class Parser
                 TokenType::T_LESS_EQUAL => BinaryOperation::OP_LESS_EQUAL,
                 TokenType::T_EQUAL => BinaryOperation::OP_EQUAL,
                 TokenType::T_NOT_EQUAL => BinaryOperation::OP_NOT_EQUAL,
+                TokenType::T_IDENTICAL => BinaryOperation::OP_IDENTICAL,
+                TokenType::T_NOT_IDENTICAL => BinaryOperation::OP_NOT_IDENTICAL,
                 TokenType::T_CONCAT => BinaryOperation::OP_CONCAT,
                 default => throw new \RuntimeException("Unexpected operator at " . $operatorToken->line . ":" . $operatorToken->column),
             };
@@ -669,6 +720,16 @@ class Parser
             throw new \RuntimeException("Unexpected end of input when parsing primary expression");
         }
 
+        // Handle assignment as expression: $var = expr
+        if ($token->type === TokenType::T_VARIABLE && $this->peekToken() &&
+            ($this->peekToken()->type === TokenType::T_ASSIGN ||
+             $this->peekToken()->type === TokenType::T_ASSIGN_PLUS ||
+             $this->peekToken()->type === TokenType::T_ASSIGN_MINUS ||
+             $this->peekToken()->type === TokenType::T_ASSIGN_MULTIPLY ||
+             $this->peekToken()->type === TokenType::T_ASSIGN_DIVIDE)) {
+            return $this->parseAssignmentExpression();
+        }
+
         if ($token->type === TokenType::T_IDENTIFIER && $this->peekToken() && $this->peekToken()->type === TokenType::T_LPAREN) {
             return $this->parseFunctionCall();
         } elseif ($token->type === TokenType::T_STRING) {
@@ -681,12 +742,20 @@ class Parser
         } elseif ($token->type === TokenType::T_VARIABLE) {
             $this->consumeToken();
             $expression = new VariableReference(ltrim($token->value, '$'), $token->line, $token->column);
-            // Handle array access: $var[expr]
+            // Handle array access: $var[expr] or $var[] for array push
             while ($this->currentToken() && $this->currentToken()->type === TokenType::T_LBRACKET) {
                 $this->consumeToken(); // consume [
-                $index = $this->parseExpression();
-                $this->consumeTokenOfType(TokenType::T_RBRACKET);
-                $expression = new ArrayAccess($expression, $index, $token->line, $token->column);
+                // Check for empty brackets (array push syntax)
+                if ($this->currentToken() && $this->currentToken()->type === TokenType::T_RBRACKET) {
+                    // Empty [] - treat as push (we'll use a special marker or just handle in generator)
+                    // For now, use null index which we'll interpret as "append" in the generator
+                    $this->consumeToken(); // consume ]
+                    $expression = new ArrayAccess($expression, null, $token->line, $token->column);
+                } else {
+                    $index = $this->parseExpression();
+                    $this->consumeTokenOfType(TokenType::T_RBRACKET);
+                    $expression = new ArrayAccess($expression, $index, $token->line, $token->column);
+                }
             }
             // Handle postfix increment/decrement
             if ($this->currentToken() && in_array($this->currentToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
@@ -701,9 +770,21 @@ class Parser
         } elseif ($token->type === TokenType::T_INTEGER) {
             $this->consumeToken();
             return new IntegerLiteral((int)$token->value, $token->line, $token->column);
+        } elseif ($token->type === TokenType::T_TRUE) {
+            $this->consumeToken();
+            return new IntegerLiteral(1, $token->line, $token->column);
+        } elseif ($token->type === TokenType::T_FALSE) {
+            $this->consumeToken();
+            return new IntegerLiteral(0, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_LBRACKET) {
             // Array literal [elem1, elem2, ...]
             return $this->parseArrayLiteral();
+        } elseif ($token->type === TokenType::T_LPAREN) {
+            // Parenthesized expression (expr)
+            $this->consumeToken(); // Consume (
+            $expression = $this->parseExpression();
+            $this->consumeTokenOfType(TokenType::T_RPAREN);
+            return $expression;
         }
 
         throw new \RuntimeException(

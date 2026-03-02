@@ -55,6 +55,10 @@ enum TokenType: int
     case T_FOREACH = 47;
     case T_AS = 48;
     case T_DECLARE = 49;
+    case T_IDENTICAL = 50;       // ===
+    case T_NOT_IDENTICAL = 51;   // !==
+    case T_TRUE = 52;            // true
+    case T_FALSE = 53;           // false
 }
 
 class Token

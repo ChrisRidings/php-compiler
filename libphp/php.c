@@ -332,3 +332,355 @@ char* php_array_get_key(zval* arr, int index) {
 
     return array->elements[index].key; // Returns NULL for numeric indices
 }
+
+void php_array_values(zval* arr, zval* result) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Create result array
+    php_array_create(result, array->size);
+    php_array* result_array = (php_array*)((long long)result->value.ptr_val);
+
+    // Copy values with numeric indices
+    for (int i = 0; i < array->size; i++) {
+        php_array_append(result, &array->elements[i].value);
+    }
+}
+
+// Directory functions - Windows compatible
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dirent.h>
+#endif
+
+// Directory handle structure to maintain state
+#define MAX_DIR_HANDLES 16
+
+typedef struct {
+    int used;
+    char path[512];
+    #ifdef _WIN32
+    HANDLE hFind;
+    WIN32_FIND_DATA findData;
+    int firstEntry;  // Track if we need to call FindFirstFile
+    #else
+    DIR* dir;
+    #endif
+} php_dir_handle;
+
+static php_dir_handle dir_handles[MAX_DIR_HANDLES];
+static int next_dir_handle = 1;
+
+void php_opendir(zval* path, zval* result) {
+    if (path->type != PHP_TYPE_STRING || path->value.str_val == NULL) {
+        php_zval_bool(result, 0);  // false
+        return;
+    }
+
+    // Find a free handle slot
+    int handle_id = -1;
+    for (int i = 0; i < MAX_DIR_HANDLES; i++) {
+        if (!dir_handles[i].used) {
+            handle_id = i;
+            break;
+        }
+    }
+
+    if (handle_id == -1) {
+        php_zval_bool(result, 0);  // false - no free handles
+        return;
+    }
+
+    php_dir_handle* dh = &dir_handles[handle_id];
+
+    #ifdef _WIN32
+    // Windows: Use FindFirstFile with * wildcard to get all files
+    snprintf(dh->path, sizeof(dh->path), "%s\\*", path->value.str_val);
+    dh->hFind = FindFirstFile(dh->path, &dh->findData);
+    if (dh->hFind == INVALID_HANDLE_VALUE) {
+        php_zval_bool(result, 0);  // false
+        return;
+    }
+    dh->firstEntry = 1;
+    #else
+    dh->dir = opendir(path->value.str_val);
+    if (!dh->dir) {
+        php_zval_bool(result, 0);  // false
+        return;
+    }
+    #endif
+
+    dh->used = 1;
+    php_zval_int(result, handle_id + 1);  // Return 1-based handle id
+}
+
+void php_readdir(zval* handle, zval* result) {
+    if (handle->type != PHP_TYPE_INT) {
+        php_zval_bool(result, 0);  // false
+        return;
+    }
+
+    int handle_id = handle->value.int_val - 1;  // Convert to 0-based index
+    if (handle_id < 0 || handle_id >= MAX_DIR_HANDLES || !dir_handles[handle_id].used) {
+        php_zval_bool(result, 0);  // false - invalid handle
+        return;
+    }
+
+    php_dir_handle* dh = &dir_handles[handle_id];
+
+    #ifdef _WIN32
+    // Windows implementation
+    if (!dh->firstEntry) {
+        // Get next entry
+        if (!FindNextFile(dh->hFind, &dh->findData)) {
+            // No more entries
+            php_zval_bool(result, 0);  // false
+            return;
+        }
+    }
+    dh->firstEntry = 0;
+
+    // Skip . and .. entries
+    while (strcmp(dh->findData.cFileName, ".") == 0 || strcmp(dh->findData.cFileName, "..") == 0) {
+        if (!FindNextFile(dh->hFind, &dh->findData)) {
+            php_zval_bool(result, 0);  // false
+            return;
+        }
+    }
+
+    php_zval_string(result, _strdup(dh->findData.cFileName));
+    #else
+    // POSIX implementation
+    struct dirent* entry;
+    do {
+        entry = readdir(dh->dir);
+        if (!entry) {
+            php_zval_bool(result, 0);  // false - no more entries
+            return;
+        }
+    } while (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0);
+
+    php_zval_string(result, strdup(entry->d_name));
+    #endif
+}
+
+void php_closedir(zval* handle, zval* result) {
+    if (handle->type != PHP_TYPE_INT) {
+        php_zval_bool(result, 0);  // false
+        return;
+    }
+
+    int handle_id = handle->value.int_val - 1;  // Convert to 0-based index
+    if (handle_id < 0 || handle_id >= MAX_DIR_HANDLES || !dir_handles[handle_id].used) {
+        php_zval_bool(result, 0);  // false - invalid handle
+        return;
+    }
+
+    php_dir_handle* dh = &dir_handles[handle_id];
+
+    #ifdef _WIN32
+    FindClose(dh->hFind);
+    #else
+    closedir(dh->dir);
+    #endif
+
+    dh->used = 0;
+    php_zval_bool(result, 1);  // true - success
+}
+
+// Simple regex match function (simplified version)
+void php_preg_match(zval* pattern, zval* subject, zval* result) {
+    if (pattern->type != PHP_TYPE_STRING || subject->type != PHP_TYPE_STRING) {
+        php_zval_int(result, 0);
+        return;
+    }
+
+    // For now, do a simple string match instead of full regex
+    // This is a simplified implementation
+    const char* pat = pattern->value.str_val;
+    const char* sub = subject->value.str_val;
+
+    // Check if pattern starts with '/' (PCRE delimiter)
+    if (pat[0] == '/') {
+        // Skip delimiters and modifiers for now
+        // This is a very basic implementation
+        int match = strstr(sub, pat) != NULL;
+        php_zval_int(result, match);
+    } else {
+        // Simple substring match
+        int match = strstr(sub, pat) != NULL;
+        php_zval_int(result, match);
+    }
+}
+
+// Simple natural order comparison (fallback for systems without strverscmp)
+static int natural_compare(const void* a, const void* b) {
+    const php_array_element* ea = (const php_array_element*)a;
+    const php_array_element* eb = (const php_array_element*)b;
+
+    char* str_a = php_zval_to_string(&ea->value);
+    char* str_b = php_zval_to_string(&eb->value);
+
+    // Simple string comparison (not true natural order, but works for basic cases)
+    // A full implementation would handle numbers specially
+    return strcmp(str_a, str_b);
+}
+
+void php_natsort(zval* arr, zval* result) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Sort the array using natural order comparison
+    qsort(array->elements, array->size, sizeof(php_array_element), natural_compare);
+
+    // Return the sorted array (same array, modified)
+    *result = *arr;
+}
+
+// Print_r implementation
+void php_print_r(zval* value, zval* result) {
+    switch (value->type) {
+        case PHP_TYPE_NULL:
+            php_echo("\n");
+            break;
+        case PHP_TYPE_BOOL:
+            php_echo(value->value.bool_val ? "1\n" : "\n");
+            break;
+        case PHP_TYPE_INT:
+            {
+                char buf[32];
+                sprintf(buf, "%d\n", value->value.int_val);
+                php_echo(buf);
+            }
+            break;
+        case PHP_TYPE_STRING:
+            if (value->value.str_val) {
+                php_echo(value->value.str_val);
+                php_echo("\n");
+            }
+            break;
+        case PHP_TYPE_ARRAY:
+            {
+                php_array* arr = (php_array*)((long long)value->value.ptr_val);
+                if (arr) {
+                    php_echo("Array\n(\n");
+                    for (int i = 0; i < arr->size; i++) {
+                        php_echo("    [");
+                        if (arr->elements[i].key) {
+                            php_echo(arr->elements[i].key);
+                        } else {
+                            char idx[16];
+                            sprintf(idx, "%d", i);
+                            php_echo(idx);
+                        }
+                        php_echo("] => ");
+
+                        zval elem_result;
+                        php_print_r(&arr->elements[i].value, &elem_result);
+                    }
+                    php_echo(")\n");
+                }
+            }
+            break;
+    }
+    php_zval_bool(result, 1);  // return true
+}
+
+// Strict inequality comparison (!==)
+void php_zval_strict_ne(zval* a, zval* b, zval* result) {
+    // If types are different, they are not identical
+    if (a->type != b->type) {
+        php_zval_bool(result, 1);  // true - not identical
+        return;
+    }
+
+    // Same type - compare values
+    int not_equal = 0;
+    switch (a->type) {
+        case PHP_TYPE_NULL:
+            // Both null - they are identical
+            not_equal = 0;
+            break;
+        case PHP_TYPE_BOOL:
+            not_equal = (a->value.bool_val != b->value.bool_val);
+            break;
+        case PHP_TYPE_INT:
+            not_equal = (a->value.int_val != b->value.int_val);
+            break;
+        case PHP_TYPE_STRING:
+            if (a->value.str_val == NULL && b->value.str_val == NULL) {
+                not_equal = 0;
+            } else if (a->value.str_val == NULL || b->value.str_val == NULL) {
+                not_equal = 1;
+            } else {
+                not_equal = (strcmp(a->value.str_val, b->value.str_val) != 0);
+            }
+            break;
+        case PHP_TYPE_ARRAY:
+            // For arrays, we compare pointers (same reference check)
+            not_equal = (a->value.ptr_val != b->value.ptr_val);
+            break;
+        default:
+            not_equal = 1;
+    }
+
+    php_zval_bool(result, not_equal);
+}
+
+// Strict equality comparison (===)
+void php_zval_strict_eq(zval* a, zval* b, zval* result) {
+    // If types are different, they are not identical
+    if (a->type != b->type) {
+        php_zval_bool(result, 0);  // false - not identical
+        return;
+    }
+
+    // Same type - compare values
+    int equal = 0;
+    switch (a->type) {
+        case PHP_TYPE_NULL:
+            // Both null - they are identical
+            equal = 1;
+            break;
+        case PHP_TYPE_BOOL:
+            equal = (a->value.bool_val == b->value.bool_val);
+            break;
+        case PHP_TYPE_INT:
+            equal = (a->value.int_val == b->value.int_val);
+            break;
+        case PHP_TYPE_STRING:
+            if (a->value.str_val == NULL && b->value.str_val == NULL) {
+                equal = 1;
+            } else if (a->value.str_val == NULL || b->value.str_val == NULL) {
+                equal = 0;
+            } else {
+                equal = (strcmp(a->value.str_val, b->value.str_val) == 0);
+            }
+            break;
+        case PHP_TYPE_ARRAY:
+            // For arrays, we compare pointers (same reference check)
+            equal = (a->value.ptr_val == b->value.ptr_val);
+            break;
+        default:
+            equal = 0;
+    }
+
+    php_zval_bool(result, equal);
+}

@@ -16,6 +16,8 @@ class BinaryOperation extends Expression
     public const OP_LESS_EQUAL = '<=';
     public const OP_EQUAL = '==';
     public const OP_NOT_EQUAL = '!=';
+    public const OP_IDENTICAL = '===';
+    public const OP_NOT_IDENTICAL = '!==';
     public const OP_CONCAT = '.';
 
     public function __construct(

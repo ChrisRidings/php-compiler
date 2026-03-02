@@ -8,7 +8,7 @@ class ArrayAccess extends Expression
 {
     public function __construct(
         public readonly Expression $array,
-        public readonly Expression $index,
+        public readonly ?Expression $index,
         int $line = 1,
         int $column = 1
     ) {
@@ -17,6 +17,9 @@ class ArrayAccess extends Expression
 
     public function __toString(): string
     {
+        if ($this->index === null) {
+            return "{$this->array}[]";
+        }
         return "{$this->array}[{$this->index}]";
     }
 }
