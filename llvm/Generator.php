@@ -32,6 +32,7 @@ class Generator
     public function generate(): string
     {
         $ir = [];
+        $globalVars = [];
 
         // LLVM IR header
         $ir[] = "; ModuleID = 'phpcompiler'";
@@ -43,13 +44,25 @@ class Generator
         $ir[] = "declare void @php_echo(i8*)";
         $ir[] = "";
 
+        // Collect all global string constants first
+        foreach ($this->statements as $statement) {
+            $this->collectGlobals($statement, $globalVars);
+        }
+
+        // Add global variables to IR
+        foreach ($globalVars as $globalName => $globalData) {
+            $ir[] = "; Global string constant";
+            $ir[] = "@{$globalName} = private unnamed_addr constant [{$globalData['length']} x i8] c\"{$globalData['escapedValue']}\\00\"";
+            $ir[] = "";
+        }
+
         // Define main function
         $ir[] = "define i32 @main() {";
         $ir[] = "entry:";
 
         // Generate code for each statement
         foreach ($this->statements as $statement) {
-            $this->generateStatement($statement, $ir);
+            $this->generateStatement($statement, $ir, $globalVars);
         }
 
         // Return 0 from main
@@ -60,10 +73,28 @@ class Generator
         return implode("\n", $ir);
     }
 
-    private function generateStatement(Statement $statement, array &$ir): void
+    private function collectGlobals(Node $node, array &$globalVars): void
+    {
+        if ($node instanceof EchoStatement) {
+            foreach ($node->expressions as $expression) {
+                $this->collectGlobals($expression, $globalVars);
+            }
+        } elseif ($node instanceof StringLiteral) {
+            $globalName = "__str_const_" . md5($node->value);
+            if (!isset($globalVars[$globalName])) {
+                $globalVars[$globalName] = [
+                    'value' => $node->value,
+                    'escapedValue' => $this->escapeString($node->value),
+                    'length' => strlen($node->value) + 1 // +1 for null terminator
+                ];
+            }
+        }
+    }
+
+    private function generateStatement(Statement $statement, array &$ir, array $globalVars): void
     {
         if ($statement instanceof EchoStatement) {
-            $this->generateEchoStatement($statement, $ir);
+            $this->generateEchoStatement($statement, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf("Unsupported statement type: %s", get_class($statement))
@@ -71,17 +102,17 @@ class Generator
         }
     }
 
-    private function generateEchoStatement(EchoStatement $statement, array &$ir): void
+    private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void
     {
         foreach ($statement->expressions as $expression) {
-            $this->generateExpression($expression, $ir);
+            $this->generateExpression($expression, $ir, $globalVars);
         }
     }
 
-    private function generateExpression(Node $expression, array &$ir): void
+    private function generateExpression(Node $expression, array &$ir, array $globalVars): void
     {
         if ($expression instanceof StringLiteral) {
-            $this->generateStringLiteral($expression, $ir);
+            $this->generateStringLiteral($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf("Unsupported expression type: %s", get_class($expression))
@@ -89,18 +120,13 @@ class Generator
         }
     }
 
-    private function generateStringLiteral(StringLiteral $literal, array &$ir): void
+    private function generateStringLiteral(StringLiteral $literal, array &$ir, array $globalVars): void
     {
-        // Create a global string constant
         $globalName = "__str_const_" . md5($literal->value);
-        $escapedValue = $this->escapeString($literal->value);
-
-        $ir[] = "; Global string constant";
-        $ir[] = "@{$globalName} = private unnamed_addr constant [". (strlen($literal->value) + 1) . " x i8] c\"{$escapedValue}\\00\"";
-        $ir[] = "";
 
         // Get pointer to the string
-        $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [". (strlen($literal->value) + 1) . " x i8], [". (strlen($literal->value) + 1) . " x i8]* @{$globalName}, i64 0, i64 0";
+        $globalData = $globalVars[$globalName];
+        $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
 
         // Call php_echo function
         $ir[] = "  call void @php_echo(i8* %{$globalName}_ptr)";
