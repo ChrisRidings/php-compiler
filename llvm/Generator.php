@@ -85,6 +85,7 @@ class Generator
         $ir[] = "declare void @php_array_create(%struct.zval*, i32)";
         $ir[] = "declare void @php_array_append(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_array_get(%struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_array_set(%struct.zval*, i8*, %struct.zval*)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -210,6 +211,12 @@ class Generator
         } elseif ($node instanceof ArrayLiteral) {
             foreach ($node->elements as $element) {
                 $this->collectGlobals($element, $globalVars);
+            }
+            // Also collect keys for associative arrays
+            foreach ($node->keys as $key) {
+                if ($key !== null) {
+                    $this->collectGlobals($key, $globalVars);
+                }
             }
         } elseif ($node instanceof ArrayAccess) {
             $this->collectGlobals($node->array, $globalVars);
@@ -827,8 +834,27 @@ class Generator
         // Add each element to the array
         foreach ($arrayLit->elements as $index => $element) {
             $elemPtr = $this->generateExpression($element, $ir, $globalVars);
-            $indexVal = $index;
-            $ir[] = "  call void @php_array_append(%struct.zval* {$result}, %struct.zval* {$elemPtr})";
+
+            // Check if this element has a key (associative array)
+            if (isset($arrayLit->keys[$index]) && $arrayLit->keys[$index] !== null) {
+                // Associative array: key => value
+                $keyExpr = $arrayLit->keys[$index];
+                if ($keyExpr instanceof StringLiteral) {
+                    // Generate the key string
+                    $globalName = "__str_const_" . md5($keyExpr->value);
+                    $globalData = $globalVars[$globalName];
+                    $keyPtr = $this->getNextTempVariable();
+                    $ir[] = "  {$keyPtr} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+                    // Call php_array_set with key
+                    $ir[] = "  call void @php_array_set(%struct.zval* {$result}, i8* {$keyPtr}, %struct.zval* {$elemPtr})";
+                } else {
+                    // For non-string keys, fall back to append
+                    $ir[] = "  call void @php_array_append(%struct.zval* {$result}, %struct.zval* {$elemPtr})";
+                }
+            } else {
+                // Numeric array: just append
+                $ir[] = "  call void @php_array_append(%struct.zval* {$result}, %struct.zval* {$elemPtr})";
+            }
         }
 
         return $result;

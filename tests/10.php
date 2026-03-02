@@ -8,4 +8,11 @@ echo $nums[0] . " "; // 10
 echo $nums[1] . " "; // 20
 echo $nums[2] . "\n"; // 30
 
+// Associative array
+$assoc = ["a" => 1, "b" => 2, "c" => 3];
+echo "Associative array:\n";
+echo $assoc["a"] . " "; // 1
+echo $assoc["b"] . " "; // 2
+echo $assoc["c"] . "\n"; // 3
+
 ?>

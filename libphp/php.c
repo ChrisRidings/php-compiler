@@ -162,8 +162,13 @@ char* php_concat_strings(const char* str1, const char* str2) {
 // Array implementation
 #define PHP_ARRAY_INITIAL_CAPACITY 8
 
+typedef struct php_array_element {
+    char* key;      // NULL for numeric indices
+    zval value;
+} php_array_element;
+
 typedef struct php_array {
-    zval* elements;
+    php_array_element* elements;
     int size;
     int capacity;
 } php_array;
@@ -175,7 +180,7 @@ void php_array_create(zval* z, int initial_capacity) {
 
     arr->size = 0;
     arr->capacity = initial_capacity > 0 ? initial_capacity : PHP_ARRAY_INITIAL_CAPACITY;
-    arr->elements = (zval*)malloc(sizeof(zval) * arr->capacity);
+    arr->elements = (php_array_element*)malloc(sizeof(php_array_element) * arr->capacity);
     if (!arr->elements) {
         free(arr);
         return;
@@ -194,14 +199,15 @@ void php_array_append(zval* arr, zval* elem) {
     // Resize if needed
     if (array->size >= array->capacity) {
         int new_capacity = array->capacity * 2;
-        zval* new_elements = (zval*)realloc(array->elements, sizeof(zval) * new_capacity);
+        php_array_element* new_elements = (php_array_element*)realloc(array->elements, sizeof(php_array_element) * new_capacity);
         if (!new_elements) return;
         array->elements = new_elements;
         array->capacity = new_capacity;
     }
 
-    // Copy the element
-    array->elements[array->size] = *elem;
+    // Copy the element (no key for numeric append)
+    array->elements[array->size].key = NULL;
+    array->elements[array->size].value = *elem;
     array->size++;
 }
 
@@ -214,8 +220,57 @@ void php_array_get(zval* result, zval* arr, zval* index) {
     php_array* array = (php_array*)((long long)arr->value.ptr_val);
     if (!array) return;
 
+    // If index is a string, look up by key
+    if (index->type == PHP_TYPE_STRING && index->value.str_val != NULL) {
+        const char* key = index->value.str_val;
+        for (int i = 0; i < array->size; i++) {
+            if (array->elements[i].key != NULL && strcmp(array->elements[i].key, key) == 0) {
+                *result = array->elements[i].value;
+                return;
+            }
+        }
+        // Key not found - return null
+        return;
+    }
+
+    // Otherwise, treat as numeric index
     int idx = php_zval_to_int(index);
     if (idx < 0 || idx >= array->size) return;
 
-    *result = array->elements[idx];
+    *result = array->elements[idx].value;
+}
+
+void php_array_set(zval* arr, const char* key, zval* value) {
+    if (arr->type != PHP_TYPE_ARRAY) return;
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) return;
+
+    // Check if key already exists - if so, update the value
+    if (key != NULL) {
+        for (int i = 0; i < array->size; i++) {
+            if (array->elements[i].key != NULL && strcmp(array->elements[i].key, key) == 0) {
+                array->elements[i].value = *value;
+                return;
+            }
+        }
+    }
+
+    // Resize if needed
+    if (array->size >= array->capacity) {
+        int new_capacity = array->capacity * 2;
+        php_array_element* new_elements = (php_array_element*)realloc(array->elements, sizeof(php_array_element) * new_capacity);
+        if (!new_elements) return;
+        array->elements = new_elements;
+        array->capacity = new_capacity;
+    }
+
+    // Copy the key and value
+    if (key != NULL) {
+        array->elements[array->size].key = strdup(key);
+    } else {
+        array->elements[array->size].key = NULL;
+    }
+    array->elements[array->size].value = *value;
+    array->size++;
 }

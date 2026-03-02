@@ -15,7 +15,8 @@ spl_autoload_register(function ($className) {
     $paths = [
         __DIR__ . '/' . $fileName,
         __DIR__ . '/../lexer/' . $fileName,
-        __DIR__ . '/../llvm/' . $fileName
+        __DIR__ . '/../llvm/' . $fileName,
+        __DIR__ . '/../lexer/Token.php',  // Special case for TokenType enum
     ];
 
     foreach ($paths as $path) {

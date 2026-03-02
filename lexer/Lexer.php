@@ -34,6 +34,7 @@ class Lexer
         TokenType::T_RBRACE->value => '/^\}/',
         TokenType::T_LBRACKET->value => '/^\[/',
         TokenType::T_RBRACKET->value => '/^\]/',
+        TokenType::T_DOUBLE_ARROW->value => '/^=>/',
         TokenType::T_ASSIGN->value => '/^=/',
         TokenType::T_GREATER_EQUAL->value => '/^>=/',
         TokenType::T_GREATER->value => '/^>/',

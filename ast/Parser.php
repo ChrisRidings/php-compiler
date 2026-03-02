@@ -601,24 +601,45 @@ class Parser
     {
         $token = $this->consumeToken(); // Consume [
         $elements = [];
+        $keys = [];
 
         // Parse elements until we hit ]
         if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACKET) {
-            // Parse first element
-            $elements[] = $this->parseExpression();
+            // Parse first element (could be key => value or just value)
+            $firstExpr = $this->parseExpression();
+
+            // Check if this is a key => value pair
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_DOUBLE_ARROW) {
+                $this->consumeToken(); // Consume =>
+                $keys[] = $firstExpr;
+                $elements[] = $this->parseExpression();
+            } else {
+                $keys[] = null;
+                $elements[] = $firstExpr;
+            }
 
             // Parse additional elements separated by commas
             while ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
                 $this->consumeToken(); // Consume comma
                 if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACKET) {
-                    $elements[] = $this->parseExpression();
+                    $expr = $this->parseExpression();
+
+                    // Check if this is a key => value pair
+                    if ($this->currentToken() && $this->currentToken()->type === TokenType::T_DOUBLE_ARROW) {
+                        $this->consumeToken(); // Consume =>
+                        $keys[] = $expr;
+                        $elements[] = $this->parseExpression();
+                    } else {
+                        $keys[] = null;
+                        $elements[] = $expr;
+                    }
                 }
             }
         }
 
         $this->consumeTokenOfType(TokenType::T_RBRACKET);
 
-        return new ArrayLiteral($elements, $token->line, $token->column);
+        return new ArrayLiteral($elements, $keys, $token->line, $token->column);
     }
 
     private function consumeTokenOfType(TokenType $type): Token
