@@ -16,11 +16,12 @@ class BinaryOperation extends Expression
     public const OP_LESS_EQUAL = '<=';
     public const OP_EQUAL = '==';
     public const OP_NOT_EQUAL = '!=';
+    public const OP_CONCAT = '.';
 
     public function __construct(
-        public readonly Expression $left,
+        public Expression $left,
         public readonly string $operator,
-        public readonly Expression $right,
+        public Expression $right,
         int $line = 1,
         int $column = 1
     ) {

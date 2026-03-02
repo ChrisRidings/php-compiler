@@ -36,6 +36,17 @@ enum TokenType: int
     case T_LESS_EQUAL = 28;
     case T_EQUAL = 29;
     case T_NOT_EQUAL = 30;
+    case T_FOR = 31;
+    case T_CONCAT = 38;
+    case T_PLUS_PLUS = 32;
+    case T_MINUS_MINUS = 33;
+    case T_ASSIGN_PLUS = 34;
+    case T_ASSIGN_MINUS = 35;
+    case T_ASSIGN_MULTIPLY = 36;
+    case T_ASSIGN_DIVIDE = 37;
+    case T_COMMA = 39;
+    case T_CLOSE_TAG = 40;
+    case T_COMMENT = 41;
 }
 
 class Token

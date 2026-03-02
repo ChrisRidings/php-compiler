@@ -7,7 +7,8 @@ namespace PhpCompiler\AST;
 class Assignment extends Statement
 {
     public function __construct(
-        public readonly VariableReference $variable,
+        public VariableReference $variable,
+        public readonly string $operator,
         public readonly Expression $value,
         int $line = 1,
         int $column = 1
@@ -17,6 +18,6 @@ class Assignment extends Statement
 
     public function __toString(): string
     {
-        return "Assignment(variable: {$this->variable}, value: {$this->value})";
+        return "Assignment(variable: {$this->variable}, operator: {$this->operator}, value: {$this->value})";
     }
 }

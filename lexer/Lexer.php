@@ -13,11 +13,15 @@ class Lexer
 
     private const PATTERNS = [
         TokenType::T_OPEN_TAG->value => '/^<\?php/i',
+        TokenType::T_CLOSE_TAG->value => '/^\?>/',
+        // Single-line comments (//)
+        TokenType::T_COMMENT->value => '/^\/\/.*/',
         TokenType::T_ECHO->value => '/^echo\b/i',
         TokenType::T_RETURN->value => '/^return\b/i',
         TokenType::T_FUNCTION->value => '/^function\b/i',
         TokenType::T_IF->value => '/^if\b/i',
         TokenType::T_ELSE->value => '/^else\b/i',
+        TokenType::T_FOR->value => '/^for\b/i',
         TokenType::T_STRING->value => '/^"(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\'/',
         TokenType::T_INTEGER->value => '/^\d+/',
         TokenType::T_VARIABLE->value => '/^\$[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*/',
@@ -33,6 +37,14 @@ class Lexer
         TokenType::T_LESS->value => '/^</',
         TokenType::T_EQUAL->value => '/^==/',
         TokenType::T_NOT_EQUAL->value => '/^!=/',
+        TokenType::T_PLUS_PLUS->value => '/^\+\+/',
+        TokenType::T_MINUS_MINUS->value => '/^--/',
+        TokenType::T_ASSIGN_PLUS->value => '/^\+=/',
+        TokenType::T_ASSIGN_MINUS->value => '/^-=/',
+        TokenType::T_ASSIGN_MULTIPLY->value => '/^\*=/',
+        TokenType::T_ASSIGN_DIVIDE->value => '/^\/=/',
+        TokenType::T_CONCAT->value => '/^\./',
+        TokenType::T_COMMA->value => '/^,/',
         TokenType::T_PLUS->value => '/^\+/',
         TokenType::T_MINUS->value => '/^-/',
         TokenType::T_MULTIPLY->value => '/^\*/',
@@ -64,11 +76,14 @@ class Lexer
 
         while ($this->position < strlen($this->source)) {
             $token = $this->nextToken();
-            if ($token !== null) {
-                // Skip whitespace and open tag tokens
-                if ($token->type !== TokenType::T_WHITESPACE && $token->type !== TokenType::T_OPEN_TAG) {
-                    $tokens[] = $token;
-                }
+        if ($token !== null) {
+            // Skip whitespace, open/close tags, and comments
+            if ($token->type !== TokenType::T_WHITESPACE &&
+                $token->type !== TokenType::T_OPEN_TAG &&
+                $token->type !== TokenType::T_CLOSE_TAG &&
+                $token->type !== TokenType::T_COMMENT) {
+                $tokens[] = $token;
+            }
             }
         }
 

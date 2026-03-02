@@ -16,7 +16,32 @@ class StringLiteral extends Expression
 
     public static function fromQuotedString(string $quotedValue, int $line = 1, int $column = 1): self
     {
-        $value = trim($quotedValue, '\'"');
+        // Extract value between quotes
+        $trimmed = trim($quotedValue, '\'"');
+
+        // Find the actual end of the string (before any semicolon or other characters)
+        $value = $trimmed;
+        $semicolonPos = strpos($value, ';');
+        if ($semicolonPos !== false) {
+            $value = trim(substr($value, 0, $semicolonPos));
+        }
+
+        // Process escape sequences
+        $value = preg_replace_callback('/\\\\([ntrbf"\\\'\\\\])/', function($matches) {
+            $escaped = $matches[1];
+            switch ($escaped) {
+                case 'n': return "\n";
+                case 't': return "\t";
+                case 'r': return "\r";
+                case 'b': return "\b";
+                case 'f': return "\f";
+                case '"': return '"';
+                case '\'': return '\'';
+                case '\\': return '\\';
+                default: return $matches[0];
+            }
+        }, $value);
+
         return new self($value, $line, $column);
     }
 

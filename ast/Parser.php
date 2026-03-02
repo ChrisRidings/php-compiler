@@ -16,6 +16,7 @@ use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
+use PhpCompiler\AST\ForStatement;
 
 class Parser
 {
@@ -81,6 +82,9 @@ class Parser
         } elseif ($token->type === TokenType::T_IF) {
             // If statement
             return $this->parseIfStatement();
+        } elseif ($token->type === TokenType::T_FOR) {
+            // For statement
+            return $this->parseForStatement();
         }
 
         // Provide better error information
@@ -190,20 +194,39 @@ class Parser
         return new ReturnStatement($value, $returnToken->line, $returnToken->column);
     }
 
-    private function parseAssignment(): Assignment
+    private function parseAssignment(bool $consumeSemicolon = true): Assignment
     {
         $varToken = $this->consumeToken();
         $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
 
-        $this->consumeTokenOfType(TokenType::T_ASSIGN);
+        $opToken = $this->currentToken();
+        $operator = '';
+        if ($opToken->type === TokenType::T_ASSIGN) {
+            $operator = '=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_PLUS) {
+            $operator = '+=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_MINUS) {
+            $operator = '-=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_MULTIPLY) {
+            $operator = '*=';
+            $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_ASSIGN_DIVIDE) {
+            $operator = '/=';
+            $this->consumeToken();
+        } else {
+            throw new \RuntimeException("Expected assignment operator at line {$opToken->line}, column {$opToken->column}");
+        }
 
         $value = $this->parseExpression(); // parse the entire expression (left to right with precedence)
 
-        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+        if ($consumeSemicolon && $this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
             $this->consumeToken();
         }
 
-        return new Assignment($variable, $value, $varToken->line, $varToken->column);
+        return new Assignment($variable, $operator, $value, $varToken->line, $varToken->column);
     }
 
     private function parseArguments(): array
@@ -242,6 +265,97 @@ class Parser
         }
 
         return implode(' → ', $context);
+    }
+
+    private function parseForStatement(): ForStatement
+    {
+        $forToken = $this->consumeToken(); // Consume 'for'
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        // Initialization (optional) - support multiple statements separated by commas
+        $initialization = null;
+        if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
+            // For now, we'll just skip over multiple initializations
+            $initialization = $this->parseAssignment(false);
+            while ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
+                $this->consumeToken(); // Skip comma
+                if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
+                    // Skip additional initialization statements
+                    $this->parseAssignment(false);
+                }
+            }
+        }
+        $this->consumeTokenOfType(TokenType::T_SEMICOLON);
+
+        // Condition (optional)
+        $condition = null;
+        if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
+            $condition = $this->parseExpression();
+        }
+        $this->consumeTokenOfType(TokenType::T_SEMICOLON);
+
+        // Update (optional) - support multiple statements separated by commas
+        $update = null;
+        if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
+            // Check if it's an assignment
+            if ($this->currentToken()->type === TokenType::T_VARIABLE && in_array($this->peekToken()->type, [
+                TokenType::T_ASSIGN,
+                TokenType::T_ASSIGN_PLUS,
+                TokenType::T_ASSIGN_MINUS,
+                TokenType::T_ASSIGN_MULTIPLY,
+                TokenType::T_ASSIGN_DIVIDE
+            ])) {
+                $update = $this->parseAssignment(false);
+            } elseif ($this->currentToken()->type === TokenType::T_VARIABLE && in_array($this->peekToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
+                // Handle $i++ or $i-- - create an assignment with += 1 or -= 1
+                $varToken = $this->consumeToken();
+                $operatorToken = $this->consumeToken();
+                $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
+                $operator = ($operatorToken->type === TokenType::T_PLUS_PLUS) ? '+=' : '-=';
+                $update = new Assignment($variable, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $varToken->line, $varToken->column);
+            } else {
+                $update = $this->parseExpression();
+            }
+            while ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
+                $this->consumeToken(); // Skip comma
+                if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
+                    if ($this->currentToken()->type === TokenType::T_VARIABLE && in_array($this->peekToken()->type, [
+                        TokenType::T_ASSIGN,
+                        TokenType::T_ASSIGN_PLUS,
+                        TokenType::T_ASSIGN_MINUS,
+                        TokenType::T_ASSIGN_MULTIPLY,
+                        TokenType::T_ASSIGN_DIVIDE
+                    ])) {
+                        $this->parseAssignment(false);
+                    } elseif ($this->currentToken()->type === TokenType::T_VARIABLE && in_array($this->peekToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
+                        $varToken = $this->consumeToken();
+                        $operatorToken = $this->consumeToken();
+                        $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
+                        $operator = ($operatorToken->type === TokenType::T_PLUS_PLUS) ? '+=' : '-=';
+                        new Assignment($variable, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $varToken->line, $varToken->column);
+                    } else {
+                        $this->parseExpression();
+                    }
+                }
+            }
+        }
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        // Body
+        $body = [];
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LBRACE) {
+            $this->consumeTokenOfType(TokenType::T_LBRACE);
+            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+                $body[] = $this->parseStatement();
+            }
+            $this->consumeTokenOfType(TokenType::T_RBRACE);
+        } elseif ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
+            // Single statement body without braces
+            $body[] = $this->parseStatement();
+        }
+
+        return new ForStatement($initialization, $condition, $update, $body, $forToken->line, $forToken->column);
     }
 
     private function parseIfStatement(): IfStatement
@@ -300,7 +414,8 @@ class Parser
             TokenType::T_LESS,
             TokenType::T_LESS_EQUAL,
             TokenType::T_EQUAL,
-            TokenType::T_NOT_EQUAL
+            TokenType::T_NOT_EQUAL,
+            TokenType::T_CONCAT
         ])) {
             $operatorToken = $this->consumeToken();
             $operator = match ($operatorToken->type) {
@@ -312,6 +427,7 @@ class Parser
                 TokenType::T_LESS_EQUAL => BinaryOperation::OP_LESS_EQUAL,
                 TokenType::T_EQUAL => BinaryOperation::OP_EQUAL,
                 TokenType::T_NOT_EQUAL => BinaryOperation::OP_NOT_EQUAL,
+                TokenType::T_CONCAT => BinaryOperation::OP_CONCAT,
                 default => throw new \RuntimeException("Unexpected operator at " . $operatorToken->line . ":" . $operatorToken->column),
             };
             $right = $this->parseTerm();
@@ -354,7 +470,17 @@ class Parser
             return StringLiteral::fromQuotedString($token->value, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE) {
             $this->consumeToken();
-            return new VariableReference(ltrim($token->value, '$'), $token->line, $token->column);
+            $variable = new VariableReference(ltrim($token->value, '$'), $token->line, $token->column);
+            // Handle postfix increment/decrement
+            if ($this->currentToken() && in_array($this->currentToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
+                $operatorToken = $this->consumeToken();
+                $operator = ($operatorToken->type === TokenType::T_PLUS_PLUS) ? '++' : '--';
+                // For now, treat as expression
+                // We'll need to add support for these in BinaryOperation and Generator later
+                // but for now, let's just return the variable since we don't handle it yet
+                return $variable;
+            }
+            return $variable;
         } elseif ($token->type === TokenType::T_INTEGER) {
             $this->consumeToken();
             return new IntegerLiteral((int)$token->value, $token->line, $token->column);

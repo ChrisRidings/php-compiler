@@ -8,6 +8,7 @@ use PhpCompiler\AST\EchoStatement;
 use PhpCompiler\AST\Node;
 use PhpCompiler\AST\Parser;
 use PhpCompiler\AST\Statement;
+use PhpCompiler\AST\Expression;
 use PhpCompiler\AST\StringLiteral;
 use PhpCompiler\AST\FunctionDefinition;
 use PhpCompiler\AST\FunctionCall;
@@ -17,6 +18,7 @@ use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
+use PhpCompiler\AST\ForStatement;
 
 class Generator
 {
@@ -24,6 +26,11 @@ class Generator
      * @var Statement[]
      */
     private array $statements;
+
+    /**
+     * @var array<string, bool>
+     */
+    private array $declaredVars = [];
 
     public function __construct(array $statements)
     {
@@ -141,7 +148,7 @@ class Generator
         return implode("\n", $ir);
     }
 
-    private function collectGlobals(Node $node, array &$globalVars): void
+    public function collectGlobals(Node $node, array &$globalVars): void
     {
         if ($node instanceof EchoStatement) {
             foreach ($node->expressions as $expression) {
@@ -169,13 +176,30 @@ class Generator
             foreach ($node->elseBody as $statement) {
                 $this->collectGlobals($statement, $globalVars);
             }
+        } elseif ($node instanceof ForStatement) {
+            if ($node->initialization) {
+                $this->collectGlobals($node->initialization, $globalVars);
+            }
+            if ($node->condition) {
+                $this->collectGlobals($node->condition, $globalVars);
+            }
+            if ($node->update) {
+                $this->collectGlobals($node->update, $globalVars);
+            }
+            foreach ($node->body as $statement) {
+                $this->collectGlobals($statement, $globalVars);
+            }
+        } elseif ($node instanceof BinaryOperation) {
+            $this->collectGlobals($node->left, $globalVars);
+            $this->collectGlobals($node->right, $globalVars);
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
+                $escapedValue = $this->escapeString($node->value);
                 $globalVars[$globalName] = [
                 'value' => $node->value,
-                'escapedValue' => $this->escapeString($node->value),
-                'length' => strlen($node->value) + 1 // +1 for null terminator
+                'escapedValue' => $escapedValue,
+                'length' => strlen($escapedValue) + 1 // +1 for null terminator
             ];
             }
         }
@@ -203,6 +227,8 @@ class Generator
             $this->generateReturnStatement($statement, $ir, $globalVars);
         } elseif ($statement instanceof IfStatement) {
             $this->generateIfStatement($statement, $ir, $globalVars);
+        } elseif ($statement instanceof ForStatement) {
+            $this->generateForStatement($statement, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -239,18 +265,51 @@ class Generator
     {
         // All variables are stored as zval structs on the stack
         $varName = $assignment->variable->name;
-        $ir[] = "  %{$varName} = alloca %struct.zval";
 
-        // Generate value to assign
-        $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+        // Check if variable is already declared - if not, declare it
+        if (!isset($this->declaredVars[$varName])) {
+            $ir[] = "  %{$varName} = alloca %struct.zval";
+            $this->declaredVars[$varName] = true;
+        }
 
-        // Load the value from the generated expression's pointer and store it
-        $value = $this->getNextTempVariable();
-        $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
-        $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
+        if ($assignment->operator === '=') {
+            // Simple assignment
+            $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+            $value = $this->getNextTempVariable();
+            $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
+            $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
+        } else {
+            // Compound assignment (+=, -=, *=, /=)
+            $currentVal = $this->getNextTempVariable();
+            $ir[] = "  {$currentVal} = call i32 @php_zval_to_int(%struct.zval* %{$varName})";
+
+            $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+            $valueVal = $this->getNextTempVariable();
+            $ir[] = "  {$valueVal} = call i32 @php_zval_to_int(%struct.zval* {$valuePtr})";
+
+            $resultVal = $this->getNextTempVariable();
+            switch ($assignment->operator) {
+                case '+=':
+                    $ir[] = "  {$resultVal} = add i32 {$currentVal}, {$valueVal}";
+                    break;
+                case '-=':
+                    $ir[] = "  {$resultVal} = sub i32 {$currentVal}, {$valueVal}";
+                    break;
+                case '*=':
+                    $ir[] = "  {$resultVal} = mul i32 {$currentVal}, {$valueVal}";
+                    break;
+                case '/=':
+                    $ir[] = "  {$resultVal} = sdiv i32 {$currentVal}, {$valueVal}";
+                    break;
+            }
+
+            $ir[] = "  call void @php_zval_int(%struct.zval* %{$varName}, i32 {$resultVal})";
+        }
 
         $ir[] = "";
     }
+
+
 
     private function generateFunctionDefinition(FunctionDefinition $funcDef, array &$ir, array $globalVars): void
     {
@@ -459,6 +518,88 @@ class Generator
         return $result;
     }
 
+    private function generateForStatement(ForStatement $forStmt, array &$ir, array $globalVars): void
+    {
+        // Create basic blocks for for loop
+        static $blockCounter = 0;
+        $loopHeaderBlock = "loop_header_" . ++$blockCounter;
+        $loopBodyBlock = "loop_body_" . $blockCounter;
+        $loopAfterBlock = "loop_after_" . $blockCounter;
+
+        // Get the variable name from initialization
+        $loopVarName = null;
+        if ($forStmt->initialization && $forStmt->initialization instanceof Assignment) {
+            $loopVarName = $forStmt->initialization->variable->name;
+        }
+
+        // Declare loop variable before any branches (so it dominates all uses)
+        if ($loopVarName && !isset($this->declaredVars[$loopVarName])) {
+            $ir[] = "  %{$loopVarName} = alloca %struct.zval";
+            $this->declaredVars[$loopVarName] = true;
+        }
+
+        // Generate initialization statement with unique variable name for this loop
+        if ($forStmt->initialization) {
+            // For assignments, use our declared variable name
+            if ($forStmt->initialization instanceof Assignment && $loopVarName) {
+                $valuePtr = $this->generateExpression($forStmt->initialization->value, $ir, $globalVars);
+
+                $value = $this->getNextTempVariable();
+                $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
+                $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$loopVarName}";
+            } else {
+                $this->generateStatement($forStmt->initialization, $ir, $globalVars);
+            }
+        }
+
+        // Jump to loop header
+        $ir[] = "  br label %{$loopHeaderBlock}";
+
+        // Loop header block
+        $ir[] = "{$loopHeaderBlock}:";
+        if ($forStmt->condition) {
+            $conditionPtr = $this->generateExpression($forStmt->condition, $ir, $globalVars);
+
+            // Convert condition to integer for boolean check
+            $condInt = $this->getNextTempVariable();
+            $ir[] = "  {$condInt} = call i32 @php_zval_to_int(%struct.zval* {$conditionPtr})";
+
+            // Check if condition is false
+            $isFalse = $this->getNextTempVariable();
+            $ir[] = "  {$isFalse} = icmp eq i32 {$condInt}, 0";
+
+            // Branch if false to after loop block
+            $ir[] = "  br i1 {$isFalse}, label %{$loopAfterBlock}, label %{$loopBodyBlock}";
+        } else {
+            // If no condition, loop infinitely
+            $ir[] = "  br label %{$loopBodyBlock}";
+        }
+
+        // Loop body block
+        $ir[] = "{$loopBodyBlock}:";
+        foreach ($forStmt->body as $statement) {
+            $this->generateStatement($statement, $ir, $globalVars);
+        }
+
+        // Generate update statement
+        if ($forStmt->update) {
+            // Check if update is assignment or expression
+            if ($forStmt->update instanceof Statement) {
+                $this->generateStatement($forStmt->update, $ir, $globalVars);
+            } elseif ($forStmt->update instanceof Expression) {
+                // If it's an expression, just evaluate it and discard result
+                $exprPtr = $this->generateExpression($forStmt->update, $ir, $globalVars);
+            }
+        }
+
+        // Jump back to loop header
+        $ir[] = "  br label %{$loopHeaderBlock}";
+
+        // After loop block
+        $ir[] = "{$loopAfterBlock}:";
+        $ir[] = "";
+    }
+
     private function generateIfStatement(IfStatement $ifStmt, array &$ir, array $globalVars): void
     {
         // Generate condition
@@ -528,7 +669,8 @@ class Generator
 
     private function generateVariableReference(VariableReference $varRef, array &$ir, array $globalVars): string
     {
-        // Variable is already a pointer to zval, just return it
+        // For now, just return the variable name (we'll handle unique names later)
+        // We'll fix this properly in the future
         return "%" . $varRef->name;
     }
 
@@ -536,11 +678,14 @@ class Generator
     {
         $globalName = "__str_const_" . md5($literal->value);
         $globalData = $globalVars[$globalName];
-        $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+
+        // Generate unique pointer name to avoid conflicts in different blocks
+        $ptrName = $this->getNextTempVariable();
+        $ir[] = "  {$ptrName} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
 
         $result = $this->getNextTempVariable();
         $ir[] = "  {$result} = alloca %struct.zval";
-        $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* %{$globalName}_ptr)";
+        $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* {$ptrName})";
         return $result;
     }
 
@@ -558,5 +703,12 @@ class Generator
         ];
 
         return strtr($str, $replacements);
+    }
+
+    private function getStringLengthForLLVM(string $str): int
+    {
+        // Calculate length of string when escaped for LLVM
+        $escaped = $this->escapeString($str);
+        return strlen($escaped) + 1; // +1 for null terminator
     }
 }
