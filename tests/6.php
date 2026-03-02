@@ -8,6 +8,7 @@ if ($x > 5) {
     echo "small\n";
 }
 
-if ($x > 8) {
+if ($x > 8)
+{
     echo "more than 8!\n";
 }
