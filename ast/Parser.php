@@ -47,21 +47,48 @@ class Parser
         $token = $this->currentToken();
 
         if ($token === null) {
-            throw new \RuntimeException("Unexpected end of input");
+            throw new \RuntimeException("Parser Error: Unexpected end of input");
         }
 
         if ($token->type === TokenType::T_ECHO) {
             return $this->parseEchoStatement();
         }
 
+        // Provide better error information
+        $context = $this->getContext($token);
+
         throw new \RuntimeException(
             sprintf(
-                "Unexpected token '%s' at line %d, column %d",
+                "Parser Error: Unexpected token '%s' at line %d, column %d\n" .
+                "Token value: '%s'\n" .
+                "Context: %s",
                 $token->type->name,
                 $token->line,
-                $token->column
+                $token->column,
+                $token->value,
+                $context
             )
         );
+    }
+
+    private function getContext(Token $token): string
+    {
+        $context = [];
+        $pos = $this->position;
+
+        // Get up to 3 previous tokens
+        for ($i = max(0, $pos - 3); $i < $pos; $i++) {
+            $context[] = $this->tokens[$i]->type->name;
+        }
+
+        $context[] = '[ERROR]';
+
+        // Get up to 3 next tokens
+        for ($i = $pos + 1; $i < min($pos + 4, count($this->tokens)); $i++) {
+            $context[] = $this->tokens[$i]->type->name;
+        }
+
+        return implode(' → ', $context);
     }
 
     private function parseEchoStatement(): EchoStatement

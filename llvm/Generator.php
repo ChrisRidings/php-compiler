@@ -97,7 +97,12 @@ class Generator
             $this->generateEchoStatement($statement, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
-                sprintf("Unsupported statement type: %s", get_class($statement))
+                sprintf(
+                    "LLVM Generator Error: Unsupported statement type '%s' at line %d, column %d",
+                    get_class($statement),
+                    $statement->line,
+                    $statement->column
+                )
             );
         }
     }
@@ -115,7 +120,12 @@ class Generator
             $this->generateStringLiteral($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
-                sprintf("Unsupported expression type: %s", get_class($expression))
+                sprintf(
+                    "LLVM Generator Error: Unsupported expression type '%s' at line %d, column %d",
+                    get_class($expression),
+                    $expression->line,
+                    $expression->column
+                )
             );
         }
     }

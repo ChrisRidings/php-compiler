@@ -74,14 +74,33 @@ class Lexer
             }
         }
 
+        // Provide better error information
+        $currentChar = $this->source[$this->position];
+        $context = $this->getContext($this->position, 10);
+
         throw new \RuntimeException(
             sprintf(
-                "Unexpected character '%s' at line %d, column %d",
-                $this->source[$this->position],
+                "Lexer Error: Unexpected character '%s' (ASCII: %d) at line %d, column %d\n" .
+                "Context: %s\n" .
+                "         %s",
+                $currentChar,
+                ord($currentChar),
                 $this->line,
-                $this->column
+                $this->column,
+                $context,
+                str_repeat(' ', $this->column - 1) . '^'
             )
         );
+    }
+
+    private function getContext(int $pos, int $length): string
+    {
+        $start = max(0, $pos);
+        $end = min($pos + $length, strlen($this->source));
+        $context = substr($this->source, $start, $end - $start);
+
+        // Replace non-printable characters
+        return preg_replace('/[\x00-\x1F\x7F]/', '.', $context);
     }
 
     private function updatePosition(string $value): void
