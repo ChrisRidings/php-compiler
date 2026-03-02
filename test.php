@@ -42,6 +42,10 @@ foreach ($nums as $num) {
 }
 echo "\n";
 
-
+echo "Iterating associative array:\n";
+foreach ($assoc as $key => $val) {
+    echo "$key=$val ";
+}
+echo "\n";
 
 ?>

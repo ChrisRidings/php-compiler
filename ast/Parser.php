@@ -497,10 +497,19 @@ class Parser
 
         $this->consumeTokenOfType(TokenType::T_AS);
 
-        // Parse the value variable (and optionally key variable)
+        // Parse the first variable (could be key or value)
+        $firstVarToken = $this->consumeTokenOfType(TokenType::T_VARIABLE);
+        $firstVar = new VariableReference(ltrim($firstVarToken->value, '$'), $firstVarToken->line, $firstVarToken->column);
+
+        // Check if this is key => value syntax
         $keyVar = null;
-        $valueVarToken = $this->consumeTokenOfType(TokenType::T_VARIABLE);
-        $valueVar = new VariableReference(ltrim($valueVarToken->value, '$'), $valueVarToken->line, $valueVarToken->column);
+        $valueVar = $firstVar;
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_DOUBLE_ARROW) {
+            $this->consumeToken(); // Consume =>
+            $keyVar = $firstVar; // First var was actually the key
+            $valueVarToken = $this->consumeTokenOfType(TokenType::T_VARIABLE);
+            $valueVar = new VariableReference(ltrim($valueVarToken->value, '$'), $valueVarToken->line, $valueVarToken->column);
+        }
 
         $this->consumeTokenOfType(TokenType::T_RPAREN);
 

@@ -321,3 +321,14 @@ int php_array_size(zval* arr) {
 
     return array->size;
 }
+
+char* php_array_get_key(zval* arr, int index) {
+    if (arr->type != PHP_TYPE_ARRAY) return NULL;
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) return NULL;
+
+    if (index < 0 || index >= array->size) return NULL;
+
+    return array->elements[index].key; // Returns NULL for numeric indices
+}

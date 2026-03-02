@@ -150,6 +150,17 @@ void php_array_set_by_index(zval* arr, int index, zval* value);
  */
 int php_array_size(zval* arr);
 
+/**
+ * Gets the key at a given index in an array.
+ * Returns the string key if present, otherwise returns NULL.
+ * For numeric indices, returns NULL (caller should use the index as key).
+ *
+ * @param arr The array zval
+ * @param index The index
+ * @return The key string or NULL
+ */
+char* php_array_get_key(zval* arr, int index);
+
 #ifdef __cplusplus
 }
 #endif

@@ -90,6 +90,7 @@ class Generator
         $ir[] = "declare void @php_array_set(%struct.zval*, i8*, %struct.zval*)";
         $ir[] = "declare void @php_array_set_by_index(%struct.zval*, i32, %struct.zval*)";
         $ir[] = "declare i32 @php_array_size(%struct.zval*)";
+        $ir[] = "declare i8* @php_array_get_key(%struct.zval*, i32)";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -801,6 +802,16 @@ class Generator
             $this->declaredVars[$valueVarName] = true;
         }
 
+        // Declare the key variable if present and not already declared
+        $keyVarName = null;
+        if ($foreachStmt->keyVar !== null) {
+            $keyVarName = $foreachStmt->keyVar->name;
+            if (!isset($this->declaredVars[$keyVarName])) {
+                $ir[] = "  %{$keyVarName} = alloca %struct.zval";
+                $this->declaredVars[$keyVarName] = true;
+            }
+        }
+
         // Jump to loop header
         $ir[] = "  br label %{$loopHeaderBlock}";
 
@@ -829,6 +840,15 @@ class Generator
         $elemVal = $this->getNextTempVariable();
         $ir[] = "  {$elemVal} = load %struct.zval, %struct.zval* {$elemZval}";
         $ir[] = "  store %struct.zval {$elemVal}, %struct.zval* %{$valueVarName}";
+
+        // If key variable is present, populate it
+        if ($keyVarName !== null) {
+            // Get the key - for now, just use the numeric index as string
+            // In a full implementation, we'd check if the element has a string key
+            $keyStr = $this->getNextTempVariable();
+            $ir[] = "  {$keyStr} = call i8* @php_itoa(i32 {$currentIndex})";
+            $ir[] = "  call void @php_zval_string(%struct.zval* %{$keyVarName}, i8* {$keyStr})";
+        }
 
         // Generate body statements
         foreach ($foreachStmt->body as $statement) {
