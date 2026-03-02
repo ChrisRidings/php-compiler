@@ -17,6 +17,8 @@ use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
 use PhpCompiler\AST\ForStatement;
+use PhpCompiler\AST\WhileStatement;
+use PhpCompiler\AST\DoWhileStatement;
 
 class Parser
 {
@@ -76,6 +78,17 @@ class Parser
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_ASSIGN) {
             // Assignment statement
             return $this->parseAssignment();
+        } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && in_array($this->peekToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
+            // Increment/decrement statement ($i++ or $i--)
+            $varToken = $this->consumeToken();
+            $operatorToken = $this->consumeToken();
+            $variable = new VariableReference(ltrim($varToken->value, '$'), $varToken->line, $varToken->column);
+            $operator = ($operatorToken->type === TokenType::T_PLUS_PLUS) ? '+=' : '-=';
+            // Consume semicolon if present
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+                $this->consumeToken();
+            }
+            return new Assignment($variable, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $varToken->line, $varToken->column);
         } elseif ($token->type === TokenType::T_RETURN) {
             // Return statement
             return $this->parseReturnStatement();
@@ -85,6 +98,12 @@ class Parser
         } elseif ($token->type === TokenType::T_FOR) {
             // For statement
             return $this->parseForStatement();
+        } elseif ($token->type === TokenType::T_WHILE) {
+            // While statement
+            return $this->parseWhileStatement();
+        } elseif ($token->type === TokenType::T_DO) {
+            // Do-while statement
+            return $this->parseDoWhileStatement();
         }
 
         // Provide better error information
@@ -358,6 +377,59 @@ class Parser
         }
 
         return new ForStatement($initializations, $condition, $updates, $body, $forToken->line, $forToken->column);
+    }
+
+    private function parseWhileStatement(): WhileStatement
+    {
+        $whileToken = $this->consumeToken(); // Consume 'while'
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        $condition = $this->parseExpression();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        // Body
+        $body = [];
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LBRACE) {
+            $this->consumeTokenOfType(TokenType::T_LBRACE);
+            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+                $body[] = $this->parseStatement();
+            }
+            $this->consumeTokenOfType(TokenType::T_RBRACE);
+        } elseif ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
+            // Single statement body without braces
+            $body[] = $this->parseStatement();
+        }
+
+        return new WhileStatement($condition, $body, $whileToken->line, $whileToken->column);
+    }
+
+    private function parseDoWhileStatement(): DoWhileStatement
+    {
+        $doToken = $this->consumeToken(); // Consume 'do'
+
+        // Body
+        $body = [];
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LBRACE) {
+            $this->consumeTokenOfType(TokenType::T_LBRACE);
+            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+                $body[] = $this->parseStatement();
+            }
+            $this->consumeTokenOfType(TokenType::T_RBRACE);
+        } elseif ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE && $this->currentToken()->type !== TokenType::T_SEMICOLON) {
+            // Single statement body without braces
+            $body[] = $this->parseStatement();
+        }
+
+        $this->consumeTokenOfType(TokenType::T_WHILE);
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        $condition = $this->parseExpression();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+        $this->consumeTokenOfType(TokenType::T_SEMICOLON);
+
+        return new DoWhileStatement($body, $condition, $doToken->line, $doToken->column);
     }
 
     private function parseIfStatement(): IfStatement

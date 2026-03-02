@@ -19,6 +19,8 @@ use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
 use PhpCompiler\AST\ForStatement;
+use PhpCompiler\AST\WhileStatement;
+use PhpCompiler\AST\DoWhileStatement;
 
 class Generator
 {
@@ -190,6 +192,16 @@ class Generator
             foreach ($node->body as $statement) {
                 $this->collectGlobals($statement, $globalVars);
             }
+        } elseif ($node instanceof WhileStatement) {
+            $this->collectGlobals($node->condition, $globalVars);
+            foreach ($node->body as $statement) {
+                $this->collectGlobals($statement, $globalVars);
+            }
+        } elseif ($node instanceof DoWhileStatement) {
+            $this->collectGlobals($node->condition, $globalVars);
+            foreach ($node->body as $statement) {
+                $this->collectGlobals($statement, $globalVars);
+            }
         } elseif ($node instanceof BinaryOperation) {
             $this->collectGlobals($node->left, $globalVars);
             $this->collectGlobals($node->right, $globalVars);
@@ -230,6 +242,10 @@ class Generator
             $this->generateIfStatement($statement, $ir, $globalVars);
         } elseif ($statement instanceof ForStatement) {
             $this->generateForStatement($statement, $ir, $globalVars);
+        } elseif ($statement instanceof WhileStatement) {
+            $this->generateWhileStatement($statement, $ir, $globalVars);
+        } elseif ($statement instanceof DoWhileStatement) {
+            $this->generateDoWhileStatement($statement, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -606,6 +622,86 @@ class Generator
 
         // Jump back to loop header
         $ir[] = "  br label %{$loopHeaderBlock}";
+
+        // After loop block
+        $ir[] = "{$loopAfterBlock}:";
+        $ir[] = "";
+    }
+
+    private function generateWhileStatement(WhileStatement $whileStmt, array &$ir, array $globalVars): void
+    {
+        // Create basic blocks for while loop
+        static $blockCounter = 0;
+        $loopHeaderBlock = "while_header_" . ++$blockCounter;
+        $loopBodyBlock = "while_body_" . $blockCounter;
+        $loopAfterBlock = "while_after_" . $blockCounter;
+
+        // Jump to loop header
+        $ir[] = "  br label %{$loopHeaderBlock}";
+
+        // Loop header block - evaluate condition
+        $ir[] = "{$loopHeaderBlock}:";
+        $conditionPtr = $this->generateExpression($whileStmt->condition, $ir, $globalVars);
+
+        // Convert condition to integer for boolean check
+        $condInt = $this->getNextTempVariable();
+        $ir[] = "  {$condInt} = call i32 @php_zval_to_int(%struct.zval* {$conditionPtr})";
+
+        // Check if condition is false
+        $isFalse = $this->getNextTempVariable();
+        $ir[] = "  {$isFalse} = icmp eq i32 {$condInt}, 0";
+
+        // Branch if false to after loop block, otherwise to body
+        $ir[] = "  br i1 {$isFalse}, label %{$loopAfterBlock}, label %{$loopBodyBlock}";
+
+        // Loop body block
+        $ir[] = "{$loopBodyBlock}:";
+        foreach ($whileStmt->body as $statement) {
+            $this->generateStatement($statement, $ir, $globalVars);
+        }
+
+        // Jump back to loop header
+        $ir[] = "  br label %{$loopHeaderBlock}";
+
+        // After loop block
+        $ir[] = "{$loopAfterBlock}:";
+        $ir[] = "";
+    }
+
+    private function generateDoWhileStatement(DoWhileStatement $doWhileStmt, array &$ir, array $globalVars): void
+    {
+        // Create basic blocks for do-while loop
+        static $blockCounter = 0;
+        $loopBodyBlock = "dowhile_body_" . ++$blockCounter;
+        $loopHeaderBlock = "dowhile_header_" . $blockCounter;
+        $loopAfterBlock = "dowhile_after_" . $blockCounter;
+
+        // Jump directly to body (do-while executes body at least once)
+        $ir[] = "  br label %{$loopBodyBlock}";
+
+        // Loop body block
+        $ir[] = "{$loopBodyBlock}:";
+        foreach ($doWhileStmt->body as $statement) {
+            $this->generateStatement($statement, $ir, $globalVars);
+        }
+
+        // Jump to header to evaluate condition
+        $ir[] = "  br label %{$loopHeaderBlock}";
+
+        // Loop header block - evaluate condition
+        $ir[] = "{$loopHeaderBlock}:";
+        $conditionPtr = $this->generateExpression($doWhileStmt->condition, $ir, $globalVars);
+
+        // Convert condition to integer for boolean check
+        $condInt = $this->getNextTempVariable();
+        $ir[] = "  {$condInt} = call i32 @php_zval_to_int(%struct.zval* {$conditionPtr})";
+
+        // Check if condition is true (continue looping) or false (exit)
+        $isTrue = $this->getNextTempVariable();
+        $ir[] = "  {$isTrue} = icmp ne i32 {$condInt}, 0";
+
+        // Branch if true back to body, otherwise to after loop
+        $ir[] = "  br i1 {$isTrue}, label %{$loopBodyBlock}, label %{$loopAfterBlock}";
 
         // After loop block
         $ir[] = "{$loopAfterBlock}:";

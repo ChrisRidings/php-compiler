@@ -47,6 +47,8 @@ enum TokenType: int
     case T_COMMA = 39;
     case T_CLOSE_TAG = 40;
     case T_COMMENT = 41;
+    case T_WHILE = 42;
+    case T_DO = 43;
 }
 
 class Token
