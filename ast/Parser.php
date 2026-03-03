@@ -382,20 +382,39 @@ class Parser
         $parameters = [];
 
         if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
-            // Parse first parameter
-            if ($this->currentToken()->type === TokenType::T_VARIABLE) {
-                $paramToken = $this->consumeToken();
-                $parameters[] = new Parameter(ltrim($paramToken->value, '$'), $paramToken->line, $paramToken->column);
+            // Parse first parameter (may have type hint)
+            $param = $this->parseSingleParameter();
+            if ($param !== null) {
+                $parameters[] = $param;
             }
 
-            // Parse additional parameters
-            while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
-                // We'll skip any other token types for now (like type hints or commas)
-                $this->consumeToken();
+            // Parse additional parameters separated by commas
+            while ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
+                $this->consumeToken(); // Consume comma
+                $param = $this->parseSingleParameter();
+                if ($param !== null) {
+                    $parameters[] = $param;
+                }
             }
         }
 
         return $parameters;
+    }
+
+    private function parseSingleParameter(): ?Parameter
+    {
+        // Skip type hints (identifiers like int, string, bool, etc.)
+        while ($this->currentToken() && $this->currentToken()->type === TokenType::T_IDENTIFIER) {
+            $this->consumeToken(); // Skip type hint
+        }
+
+        // Now expect the variable name
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_VARIABLE) {
+            $paramToken = $this->consumeToken();
+            return new Parameter(ltrim($paramToken->value, '$'), $paramToken->line, $paramToken->column);
+        }
+
+        return null;
     }
 
     private function parseFunctionBody(): array

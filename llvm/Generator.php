@@ -845,7 +845,7 @@ class Generator
         // Allocate stack space for other parameters
         foreach ($method->parameters as $i => $param) {
             $ir[] = "  %{$param->name} = alloca %struct.zval";
-            $ir[] = "  store %struct.zval %{" . ($i + 1) . "}, %struct.zval* %{$param->name}";
+            $ir[] = "  store %struct.zval %" . ($i + 1) . ", %struct.zval* %{$param->name}";
             $this->declaredVars[$param->name] = true;
         }
 

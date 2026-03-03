@@ -115,9 +115,9 @@ char* php_zval_to_string(const zval* z) {
 
     switch (z->type) {
         case PHP_TYPE_NULL:
-            return "NULL";
+            return "";  // PHP: null converts to empty string in concatenation
         case PHP_TYPE_BOOL:
-            return z->value.bool_val ? "1" : "0";
+            return z->value.bool_val ? "1" : "";
         case PHP_TYPE_INT:
             sprintf(buffer, "%d", z->value.int_val);
             return buffer;
