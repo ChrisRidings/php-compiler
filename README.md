@@ -249,7 +249,7 @@ This is a prototype compiler implementation. Notable limitations:
 
 - Limited standard library coverage
 - **Windows only** - uses Windows APIs in runtime library
-- No garbage collection (memory leaks possible)
+- Garbage Collection - refcount, no mark and sweep
 - No exception handling
 - No namespaces
 - Limited reflection capabilities
