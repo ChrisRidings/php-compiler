@@ -1,30 +1,58 @@
 Running PHP to LLVM tests...
 ----------------------------------------------------------------------
 Testing 1.php...
+---Hello, world!---
+---Hello, world!---
   PASSED
 
 Testing 2.php...
+---Hello, world!---
+---Hello, world!---
   PASSED
 
 Testing 3.php...
+---Hello, Alice!---
+---Hello, Alice!---
   PASSED
 
 Testing 4.php...
+---Hello, Alice!5---
+---Hello, Alice!5---
   PASSED
 
 Testing 5.php...
+---9---
+---9---
   PASSED
 
 Testing 6.php...
+---big
+more than 8!---
+---big
+more than 8!---
   FAILED: Output mismatch
   PHP Output:
 big
-    more than 8!-
+    more than 8!
   LLVM Output:
-big
-    more than 8!-
+big
+    more than 8!
 
 Testing 7.php...
+---=== For Loop Tests ===
+Ascending 0..4: 0 1 2 3 4 
+Descending 5..1: 5 4 3 2 1 
+Step 2: 0 2 4 6 8 10 
+Negative step: 10 7 4 1 
+Empty loop body: done
+Multiple vars: i=0,j=10 i=1,j=8 i=2,j=6 i=3,j=4 i=4,j=2---
+---=== For Loop Tests ===
+Ascending 0..4: 0 1 2 3 4 
+Descending 5..1: 5 4 3 2 1 
+Step 2: 0 2 4 6 8 10 
+Negative step: 10 7 4 1 
+Empty loop body: done
+Multiple vars: i=0,j=10 i=1,j=8 i=2,j=6 i=3,j=4 i=4,j=2---
   FAILED: Output mismatch
   PHP Output:
 === For Loop Tests ===
@@ -33,33 +61,81 @@ Testing 7.php...
     Step 2: 0 2 4 6 8 10 
     Negative step: 10 7 4 1 
     Empty loop body: done
-    Multiple vars: i=0,j=10 i=1,j=8 i=2,j=6 i=3,j=4 i=4,j=2-
+    Multiple vars: i=0,j=10 i=1,j=8 i=2,j=6 i=3,j=4 i=4,j=2
   LLVM Output:
-=== For Loop Tests ===
-    Ascending 0..4: 0 1 2 3 4 
-    Descending 5..1: 5 4 3 2 1 
-    Step 2: 0 2 4 6 8 10 
-    Negative step: 10 7 4 1 
-    Empty loop body: done
-    Multiple vars: i=0,j=10 i=1,j=8 i=2,j=6 i=3,j=4 i=4,j=2-
+=== For Loop Tests ===
+    Ascending 0..4: 0 1 2 3 4 
+    Descending 5..1: 5 4 3 2 1 
+    Step 2: 0 2 4 6 8 10 
+    Negative step: 10 7 4 1 
+    Empty loop body: done
+    Multiple vars: i=0,j=10 i=1,j=8 i=2,j=6 i=3,j=4 i=4,j=2
 
 Testing 8.php...
+---=== While Loop Tests ===
+Ascending 0..4: 0 1 2 3 4 
+Descending 5..1: 5 4 3 2 1 
+Do-while loop 1..3: 1 2 3---
+---=== While Loop Tests ===
+Ascending 0..4: 0 1 2 3 4 
+Descending 5..1: 5 4 3 2 1 
+Do-while loop 1..3: 1 2 3---
   FAILED: Output mismatch
   PHP Output:
 === While Loop Tests ===
     Ascending 0..4: 0 1 2 3 4 
     Descending 5..1: 5 4 3 2 1 
-    Do-while loop 1..3: 1 2 3-
+    Do-while loop 1..3: 1 2 3
   LLVM Output:
-=== While Loop Tests ===
-    Ascending 0..4: 0 1 2 3 4 
-    Descending 5..1: 5 4 3 2 1 
-    Do-while loop 1..3: 1 2 3-
+=== While Loop Tests ===
+    Ascending 0..4: 0 1 2 3 4 
+    Descending 5..1: 5 4 3 2 1 
+    Do-while loop 1..3: 1 2 3
 
 Testing 9.php...
+---120---
+---120---
   PASSED
 
 Testing 10.php...
+---=== Array Tests ===
+Numeric array:
+10 20 30
+Associative array:
+1 2 3
+Mixed array:
+zero 1 two
+Updated numeric array:
+10 42 30
+Updated associative array:
+1 99 3
+Iterating numeric array:
+10 42 30 
+Iterating associative array:
+a=1 b=99 c=3 
+Empty array length: 0
+Single element array: 42
+Nested array:
+1 c---
+---=== Array Tests ===
+Numeric array:
+10 20 30
+Associative array:
+1 2 3
+Mixed array:
+zero 1 two
+Updated numeric array:
+10 42 30
+Updated associative array:
+1 99 3
+Iterating numeric array:
+10 42 30 
+Iterating associative array:
+a=1 b=99 c=3 
+Empty array length: 0
+Single element array: 42
+Nested array:
+1 c---
   FAILED: Output mismatch
   PHP Output:
 === Array Tests ===
@@ -80,27 +156,27 @@ Testing 10.php...
     Empty array length: 0
     Single element array: 42
     Nested array:
-    1 c-
+    1 c
   LLVM Output:
-=== Array Tests ===
-    Numeric array:
-    10 20 30
-    Associative array:
-    1 2 3
-    Mixed array:
-    zero 1 two
-    Updated numeric array:
-    10 42 30
-    Updated associative array:
-    1 99 3
-    Iterating numeric array:
-    10 42 30 
-    Iterating associative array:
-    a=1 b=99 c=3 
-    Empty array length: 0
-    Single element array: 42
-    Nested array:
-    1 c-
+=== Array Tests ===
+    Numeric array:
+    10 20 30
+    Associative array:
+    1 2 3
+    Mixed array:
+    zero 1 two
+    Updated numeric array:
+    10 42 30
+    Updated associative array:
+    1 99 3
+    Iterating numeric array:
+    10 42 30 
+    Iterating associative array:
+    a=1 b=99 c=3 
+    Empty array length: 0
+    Single element array: 42
+    Nested array:
+    1 c
 
 ----------------------------------------------------------------------
 Test Results: 6 passed, 4 failed

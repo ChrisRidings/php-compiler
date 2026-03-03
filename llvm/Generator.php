@@ -87,6 +87,7 @@ class Generator
         $ir[] = "";
 
         // Declare external zval functions (pass by pointer)
+        $ir[] = "declare void @php_debug_print_zval(i8*, %struct.zval*)";
         $ir[] = "declare void @php_echo_zval(%struct.zval*)";
         $ir[] = "declare void @php_zval_null(%struct.zval*)";
         $ir[] = "declare void @php_zval_bool(%struct.zval*, i32)";
@@ -138,6 +139,20 @@ class Generator
             $ir[] = "@{$globalName} = private unnamed_addr constant [{$evlen} x i8] c\"{$ev}\"";
             $ir[] = "";
         }
+
+        // Add debug string constant for shell_exec
+        $ir[] = "; Debug string for shell_exec";
+        $ir[] = '@.str.shell_exec_debug = private unnamed_addr constant [18 x i8] c"shell_exec result\\00"';
+
+        // Debug string for trim
+        $ir[] = "; Debug string for trim";
+        $ir[] = '@.str.trim_debug = private unnamed_addr constant [11 x i8] c"trim input\\00"';
+
+        // Debug string for trim result
+        $ir[] = "; Debug string for trim result";
+        $ir[] = '@.str.trim_result_debug = private unnamed_addr constant [12 x i8] c"trim result\\00"';
+
+        $ir[] = "";
 
         // Separate statements into function definitions and other statements
         $functionDefinitions = [];
@@ -1220,9 +1235,17 @@ class Generator
         }
 
         $strPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Debug: log what variable is being trimmed
+        $ir[] = "  call void @php_debug_print_zval(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str.trim_debug, i64 0, i64 0), %struct.zval* {$strPtr})";
+
         $resultPtr = $this->getNextTempVariable();
         $ir[] = "  {$resultPtr} = alloca %struct.zval";
         $ir[] = "  call void @php_trim(%struct.zval* {$strPtr}, %struct.zval* {$resultPtr})";
+
+        // Debug: log the result of trim
+        $ir[] = "  call void @php_debug_print_zval(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str.trim_result_debug, i64 0, i64 0), %struct.zval* {$resultPtr})";
+
         return $resultPtr;
     }
 
@@ -1246,9 +1269,19 @@ class Generator
         }
 
         $cmdPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
-        $resultPtr = $this->getNextTempVariable();
+
+        // Use a unique variable name that won't conflict
+        static $shellExecCounter = 0;
+        $shellExecCounter++;
+        $resultPtr = "%shell_exec_result_" . $shellExecCounter;
+
+        // Allocate in entry block to ensure it dominates all uses
         $ir[] = "  {$resultPtr} = alloca %struct.zval";
         $ir[] = "  call void @php_shell_exec(%struct.zval* {$cmdPtr}, %struct.zval* {$resultPtr})";
+
+        // Add debug call to verify the result immediately after shell_exec
+        $ir[] = "  call void @php_debug_print_zval(i8* getelementptr inbounds ([18 x i8], [18 x i8]* @.str.shell_exec_debug, i64 0, i64 0), %struct.zval* {$resultPtr})";
+
         return $resultPtr;
     }
 
@@ -2011,9 +2044,18 @@ class Generator
 
     private function generateVariableReference(VariableReference $varRef, array &$ir, array $globalVars): string
     {
-        // For now, just return the variable name (we'll handle unique names later)
-        // We'll fix this properly in the future
-        return "%" . $varRef->name;
+        $varName = $varRef->name;
+
+        // Check if variable is declared
+        if (!isset($this->declaredVars[$varName])) {
+            // Variable not declared - this shouldn't happen for proper PHP code
+            // but we'll declare it on-the-fly as a fallback
+            error_log("[LLVM WARNING] Variable '\$" . $varName . "' used before declaration at line " . $varRef->line);
+            $ir[] = "  %{$varName} = alloca %struct.zval";
+            $this->declaredVars[$varName] = true;
+        }
+
+        return "%" . $varName;
     }
 
     private function generateStringLiteral(StringLiteral $literal, array &$ir, array $globalVars): string

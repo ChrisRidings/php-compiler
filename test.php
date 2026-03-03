@@ -96,13 +96,18 @@ foreach ($testFiles as $testFile) {
         echo "  FAILED: Could not execute compiled executable\n";
         $failCount++;
     } else {
-        if (trim($phpOutput) === trim($llvmRuntimeOutput)) {
+        //echo "---" . trim($phpOutput) . "---\n";
+        //echo "---" . trim($llvmRuntimeOutput) . "---\n";
+        // Normalize line endings for comparison
+        $phpOutputNormalized = str_replace("\r\n", "\n", trim($phpOutput));
+        $llvmOutputNormalized = str_replace("\r\n", "\n", trim($llvmRuntimeOutput));
+        if ($phpOutputNormalized === $llvmOutputNormalized) {
             echo "  PASSED\n";
             $passCount++;
         } else {
             echo "  FAILED: Output mismatch\n";
-            echo "  PHP Output:\n" . str_replace("\n", "\n    ", trim($phpOutput)) . "-\n";
-            echo "  LLVM Output:\n" . str_replace("\n", "\n    ", trim($llvmRuntimeOutput)) . "-\n";
+            echo "  PHP Output:\n" . str_replace("\n", "\n    ", trim($phpOutput)) . "\n";
+            echo "  LLVM Output:\n" . str_replace("\n", "\n    ", trim($llvmRuntimeOutput)) . "\n";
             $failCount++;
         }
     }

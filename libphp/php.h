@@ -316,6 +316,14 @@ void php_zval_strict_ne(zval* a, zval* b, zval* result);
  */
 void php_zval_strict_eq(zval* a, zval* b, zval* result);
 
+/**
+ * Debug function to print zval details to stderr.
+ *
+ * @param label Label to identify the output
+ * @param z The zval to print
+ */
+void php_debug_print_zval(const char* label, const zval* z);
+
 #ifdef __cplusplus
 }
 #endif
