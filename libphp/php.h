@@ -51,9 +51,16 @@ void php_zval_bool(zval* z, int bool_val);
 void php_zval_int(zval* z, int int_val);
 
 /**
- * Creates a string zval.
+ * Creates a string zval (raw string, no escape processing).
+ * Use this for runtime-generated strings (readdir, shell_exec output, etc.)
  */
 void php_zval_string(zval* z, const char* str);
+
+/**
+ * Creates a string zval from a PHP string literal with escape sequence processing.
+ * Use this for string literals from the compiler (\n -> newline, \" -> ", etc.)
+ */
+void php_zval_string_literal(zval* z, const char* str);
 
 /**
  * Converts a zval to string.
@@ -228,6 +235,24 @@ void php_print_r(zval* value, zval* result);
  * @param result The result zval (will contain the repeated string)
  */
 void php_str_repeat(zval* str, zval* count, zval* result);
+
+/**
+ * Trims whitespace from both ends of a string.
+ *
+ * @param str The string to trim
+ * @param result The result zval (will contain the trimmed string)
+ */
+void php_trim(zval* str, zval* result);
+
+/**
+ * Replaces all occurrences of search with replace in subject.
+ *
+ * @param search The string to search for
+ * @param replace The replacement string
+ * @param subject The string to search in
+ * @param result The result zval (will contain the modified string)
+ */
+void php_str_replace(zval* search, zval* replace, zval* subject, zval* result);
 
 /**
  * Check if a file exists.

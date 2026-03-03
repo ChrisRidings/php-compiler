@@ -65,4 +65,63 @@ foreach ($testFiles as $testFile) {
         continue;
     }
 
+    // 4. Compile to object file
+    $objectPath = $testDir . '/' . pathinfo($testFile, PATHINFO_FILENAME) . '.o';
+    $clangOutput = shell_exec('"' . $clangPath . '" -c "' . $llvmBcPath . '" -o "' . $objectPath . '" -Wno-override-module 2>&1');
+    if (!file_exists($objectPath)) {
+        echo "  FAILED: Could not compile to object file: $clangOutput\n";
+        $failCount++;
+        unlink($llvmIrPath);
+        unlink($llvmBcPath);
+        continue;
+    }
+
+    // 5. Link to executable
+    $exePath = $testDir . '/' . pathinfo($testFile, PATHINFO_FILENAME) . '.exe';
+    $linkOutput = shell_exec('"' . $clangPath . '" "' . $objectPath . '" libphp/php.c -o "' . $exePath . '" -Ilibphp -Wno-deprecated-declarations 2>&1');
+    if (!file_exists($exePath)) {
+        echo "  FAILED: Could not link to executable: $linkOutput\n";
+        $failCount++;
+        unlink($llvmIrPath);
+        unlink($llvmBcPath);
+        unlink($objectPath);
+        continue;
+    }
+
+    // 6. Run compiled version
+    $llvmRuntimeOutput = shell_exec('"' . $exePath . '" 2>&1');
+
+    // 7. Compare outputs
+    if ($llvmRuntimeOutput === null) {
+        echo "  FAILED: Could not execute compiled executable\n";
+        $failCount++;
+    } else {
+        if (trim($phpOutput) === trim($llvmRuntimeOutput)) {
+            echo "  PASSED\n";
+            $passCount++;
+        } else {
+            echo "  FAILED: Output mismatch\n";
+            echo "  PHP Output:\n" . str_replace("\n", "\n    ", trim($phpOutput)) . "-\n";
+            echo "  LLVM Output:\n" . str_replace("\n", "\n    ", trim($llvmRuntimeOutput)) . "-\n";
+            $failCount++;
+        }
+    }
+
+    // Cleanup
+    $filesToClean = [$llvmIrPath, $llvmBcPath, $objectPath, $exePath];
+    foreach ($filesToClean as $file) {
+        if (file_exists($file)) {
+            unlink($file);
+        }
+    }
+
+    echo "\n";
 }
+
+echo str_repeat('-', 70) . "\n";
+echo "Test Results: $passCount passed, $failCount failed\n";
+
+if ($failCount > 0) {
+    exit(1);
+}
+exit(0);

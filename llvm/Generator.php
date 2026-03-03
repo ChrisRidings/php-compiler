@@ -16,6 +16,7 @@ use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\BooleanLiteral;
+use PhpCompiler\AST\NullLiteral;
 use PhpCompiler\AST\UnaryOperation;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\ContinueStatement;
@@ -91,6 +92,7 @@ class Generator
         $ir[] = "declare void @php_zval_bool(%struct.zval*, i32)";
         $ir[] = "declare void @php_zval_int(%struct.zval*, i32)";
         $ir[] = "declare void @php_zval_string(%struct.zval*, i8*)";
+        $ir[] = "declare void @php_zval_string_literal(%struct.zval*, i8*)";
         $ir[] = "declare i8* @php_zval_to_string(%struct.zval*)";
         $ir[] = "declare i32 @php_zval_to_int(%struct.zval*)";
         $ir[] = "declare void @php_echo(i8*)";
@@ -113,11 +115,14 @@ class Generator
         $ir[] = "declare void @php_zval_strict_ne(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_zval_strict_eq(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_str_repeat(%struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_trim(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_file_exists(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_shell_exec(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_pathinfo(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_rename(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_unlink(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_str_replace(%struct.zval*, %struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @exit(i32) noreturn";
         $ir[] = "";
 
         // Collect all global string constants first
@@ -154,6 +159,9 @@ class Generator
          // Define main function
         $ir[] = "define i32 @main() {";
         $ir[] = "entry:";
+
+        // Pre-declare all variables at the entry block to ensure they dominate all uses
+        $this->collectAndDeclareVariables($otherStatements, $ir);
 
         // Generate code for other statements
         foreach ($otherStatements as $statement) {
@@ -276,6 +284,8 @@ class Generator
             $this->collectGlobals($node->right, $globalVars);
         } elseif ($node instanceof BooleanLiteral) {
             // Boolean literals don't have string constants to collect
+        } elseif ($node instanceof NullLiteral) {
+            // Null literals don't have string constants to collect
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
@@ -295,6 +305,129 @@ class Generator
                 }
             }
         }
+    }
+
+    /**
+     * Pre-collect all variable names from statements and declare them in the entry block.
+     * This ensures all variables dominate their uses (LLVM SSA requirement).
+     */
+    private function collectAndDeclareVariables(array $statements, array &$ir): void
+    {
+        $varNames = [];
+        $this->collectVariablesFromStatements($statements, $varNames);
+
+        // Declare all collected variables in the entry block
+        foreach ($varNames as $varName => $_) {
+            if (!isset($this->declaredVars[$varName])) {
+                $ir[] = "  %{$varName} = alloca %struct.zval";
+                $this->declaredVars[$varName] = true;
+            }
+        }
+    }
+
+    /**
+     * Recursively collect variable names from statements.
+     * @param Statement[] $statements
+     * @param array<string, bool> $varNames
+     */
+    private function collectVariablesFromStatements(array $statements, array &$varNames): void
+    {
+        foreach ($statements as $statement) {
+            $this->collectVariablesFromNode($statement, $varNames);
+        }
+    }
+
+    /**
+     * Recursively collect variable names from an AST node.
+     * @param array<string, bool> $varNames
+     */
+    private function collectVariablesFromNode(Node $node, array &$varNames): void
+    {
+        if ($node instanceof Assignment) {
+            $varNames[$node->variable->name] = true;
+            $this->collectVariablesFromNode($node->value, $varNames);
+        } elseif ($node instanceof ArrayAssignment) {
+            $this->collectVariablesFromNode($node->arrayAccess, $varNames);
+            $this->collectVariablesFromNode($node->value, $varNames);
+        } elseif ($node instanceof IfStatement) {
+            $this->collectVariablesFromNode($node->condition, $varNames);
+            foreach ($node->thenBody as $stmt) {
+                $this->collectVariablesFromNode($stmt, $varNames);
+            }
+            foreach ($node->elseBody as $stmt) {
+                $this->collectVariablesFromNode($stmt, $varNames);
+            }
+        } elseif ($node instanceof ForStatement) {
+            foreach ($node->initializations as $init) {
+                $this->collectVariablesFromNode($init, $varNames);
+            }
+            if ($node->condition) {
+                $this->collectVariablesFromNode($node->condition, $varNames);
+            }
+            foreach ($node->updates as $update) {
+                $this->collectVariablesFromNode($update, $varNames);
+            }
+            foreach ($node->body as $stmt) {
+                $this->collectVariablesFromNode($stmt, $varNames);
+            }
+        } elseif ($node instanceof WhileStatement) {
+            $this->collectVariablesFromNode($node->condition, $varNames);
+            foreach ($node->body as $stmt) {
+                $this->collectVariablesFromNode($stmt, $varNames);
+            }
+        } elseif ($node instanceof DoWhileStatement) {
+            $this->collectVariablesFromNode($node->condition, $varNames);
+            foreach ($node->body as $stmt) {
+                $this->collectVariablesFromNode($stmt, $varNames);
+            }
+        } elseif ($node instanceof ForeachStatement) {
+            $this->collectVariablesFromNode($node->array, $varNames);
+            $varNames[$node->valueVar->name] = true;
+            if ($node->keyVar !== null) {
+                $varNames[$node->keyVar->name] = true;
+            }
+            foreach ($node->body as $stmt) {
+                $this->collectVariablesFromNode($stmt, $varNames);
+            }
+        } elseif ($node instanceof FunctionDefinition) {
+            // Don't collect variables from function bodies - they're in a different scope
+            // Parameters are local to the function
+        } elseif ($node instanceof FunctionCall) {
+            foreach ($node->arguments as $arg) {
+                $this->collectVariablesFromNode($arg, $varNames);
+            }
+        } elseif ($node instanceof BinaryOperation) {
+            $this->collectVariablesFromNode($node->left, $varNames);
+            $this->collectVariablesFromNode($node->right, $varNames);
+        } elseif ($node instanceof UnaryOperation) {
+            $this->collectVariablesFromNode($node->operand, $varNames);
+        } elseif ($node instanceof ArrayAccess) {
+            $this->collectVariablesFromNode($node->array, $varNames);
+            if ($node->index !== null) {
+                $this->collectVariablesFromNode($node->index, $varNames);
+            }
+        } elseif ($node instanceof ArrayLiteral) {
+            foreach ($node->elements as $element) {
+                $this->collectVariablesFromNode($element, $varNames);
+            }
+            foreach ($node->keys as $key) {
+                if ($key !== null) {
+                    $this->collectVariablesFromNode($key, $varNames);
+                }
+            }
+        } elseif ($node instanceof ReturnStatement) {
+            if ($node->value !== null) {
+                $this->collectVariablesFromNode($node->value, $varNames);
+            }
+        } elseif ($node instanceof EchoStatement) {
+            foreach ($node->expressions as $expr) {
+                $this->collectVariablesFromNode($expr, $varNames);
+            }
+        } elseif ($node instanceof ExpressionStatement) {
+            $this->collectVariablesFromNode($node->expression, $varNames);
+        }
+        // StringLiteral, IntegerLiteral, BooleanLiteral, NullLiteral, Constant, VariableReference
+        // don't need special handling as they don't introduce new variables
     }
 
     private function generateStatement(Statement $statement, array &$ir, array $globalVars, bool $inFunction = false): void
@@ -381,7 +514,8 @@ class Generator
         // All variables are stored as zval structs on the stack
         $varName = $assignment->variable->name;
 
-        // Check if variable is already declared - if not, declare it
+        // Variables are pre-declared in the entry block via collectAndDeclareVariables
+        // If somehow not declared yet, declare it here as a fallback
         if (!isset($this->declaredVars[$varName])) {
             $ir[] = "  %{$varName} = alloca %struct.zval";
             $this->declaredVars[$varName] = true;
@@ -429,7 +563,8 @@ class Generator
         // All variables are stored as zval structs on the stack
         $varName = $assignment->variable->name;
 
-        // Check if variable is already declared - if not, declare it
+        // Variables are pre-declared in the entry block via collectAndDeclareVariables
+        // If somehow not declared yet, declare it here as a fallback
         if (!isset($this->declaredVars[$varName])) {
             $ir[] = "  %{$varName} = alloca %struct.zval";
             $this->declaredVars[$varName] = true;
@@ -512,10 +647,22 @@ class Generator
 
     private function generateFunctionDefinition(FunctionDefinition $funcDef, array &$ir, array $globalVars): void
     {
+        // Save and reset declaredVars for function scope
+        $savedDeclaredVars = $this->declaredVars;
+        $this->declaredVars = [];
+
         // All functions return zval and parameters are zval
         $paramTypes = implode(', ', array_fill(0, count($funcDef->parameters), '%struct.zval'));
         $ir[] = "define %struct.zval @{$funcDef->name}({$paramTypes}) {";
         $ir[] = "entry:";
+
+        // Add parameters to declared vars (they're allocated separately)
+        foreach ($funcDef->parameters as $param) {
+            $this->declaredVars[$param->name] = true;
+        }
+
+        // Pre-declare all local variables in the entry block
+        $this->collectAndDeclareVariables($funcDef->body, $ir);
 
         // Allocate stack space for parameters
         foreach ($funcDef->parameters as $i => $param) {
@@ -546,6 +693,9 @@ class Generator
 
         $ir[] = "}";
         $ir[] = "";
+
+        // Restore declaredVars for main scope
+        $this->declaredVars = $savedDeclaredVars;
     }
 
     private function generateFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
@@ -578,6 +728,9 @@ class Generator
         } elseif ($funcCall->name === 'str_repeat') {
             $this->generateStrRepeatFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'trim') {
+            $this->generateTrimFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'file_exists') {
             $this->generateFileExistsFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -592,6 +745,12 @@ class Generator
             return;
         } elseif ($funcCall->name === 'unlink') {
             $this->generateUnlinkFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'str_replace') {
+            $this->generateStrReplaceFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'exit') {
+            $this->generateExitFunctionCall($funcCall, $ir, $globalVars);
             return;
         }
 
@@ -779,6 +938,24 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateTrimFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 1 || count($funcCall->arguments) > 2) {
+            throw new \RuntimeException("trim() expects 1 or 2 arguments");
+        }
+
+        // Generate the string argument
+        $strPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_trim function
+        $ir[] = "  call void @php_trim(%struct.zval* {$strPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
     private function generateFileExistsFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
     {
         if (count($funcCall->arguments) !== 1) {
@@ -878,6 +1055,49 @@ class Generator
 
         // Call php_unlink function
         $ir[] = "  call void @php_unlink(%struct.zval* {$filenamePtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateStrReplaceFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 3) {
+            throw new \RuntimeException("str_replace() expects exactly 3 arguments");
+        }
+
+        // Generate the search argument
+        $searchPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the replace argument
+        $replacePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Generate the subject argument
+        $subjectPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_str_replace function
+        $ir[] = "  call void @php_str_replace(%struct.zval* {$searchPtr}, %struct.zval* {$replacePtr}, %struct.zval* {$subjectPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateExitFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        // exit() can take 0 or 1 argument
+        $exitCode = 0;
+        if (count($funcCall->arguments) > 0) {
+            // Generate the exit code argument and convert to int
+            $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+            $exitCodeVar = $this->getNextTempVariable();
+            $ir[] = "  {$exitCodeVar} = call i32 @php_zval_to_int(%struct.zval* {$argPtr})";
+            // Call exit with the provided code
+            $ir[] = "  call void @exit(i32 {$exitCodeVar})";
+        } else {
+            // Call exit with code 0
+            $ir[] = "  call void @exit(i32 0)";
+        }
+        // Note: exit is noreturn, so no code after this will execute
         $ir[] = "";
     }
 
@@ -993,6 +1213,19 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateTrimExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 1 || count($funcCall->arguments) > 2) {
+            throw new \RuntimeException("trim() expects 1 or 2 arguments");
+        }
+
+        $strPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_trim(%struct.zval* {$strPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
     private function generateFileExistsExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -1085,6 +1318,30 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateStrReplaceExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 3) {
+            throw new \RuntimeException("str_replace() expects exactly 3 arguments");
+        }
+
+        // Generate the search argument
+        $searchPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the replace argument
+        $replacePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Generate the subject argument
+        $subjectPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_str_replace function
+        $ir[] = "  call void @php_str_replace(%struct.zval* {$searchPtr}, %struct.zval* {$replacePtr}, %struct.zval* {$subjectPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
     private function generateCountExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -1125,6 +1382,8 @@ class Generator
             return $this->generateIntegerLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof BooleanLiteral) {
             return $this->generateBooleanLiteral($expression, $ir, $globalVars);
+        } elseif ($expression instanceof NullLiteral) {
+            return $this->generateNullLiteral($expression, $ir, $globalVars);
         } elseif ($expression instanceof Constant) {
             return $this->generateConstant($expression, $ir, $globalVars);
         } elseif ($expression instanceof UnaryOperation) {
@@ -1151,6 +1410,8 @@ class Generator
                 return $this->generatePrintRExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'str_repeat') {
                 return $this->generateStrRepeatExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'trim') {
+                return $this->generateTrimExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'file_exists') {
                 return $this->generateFileExistsExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'shell_exec') {
@@ -1161,6 +1422,8 @@ class Generator
                 return $this->generateRenameExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'unlink') {
                 return $this->generateUnlinkExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'str_replace') {
+                return $this->generateStrReplaceExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval
@@ -1218,12 +1481,28 @@ class Generator
         return $result;
     }
 
+    private function generateNullLiteral(NullLiteral $literal, array &$ir, array $globalVars): string
+    {
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_null(%struct.zval* {$result})";
+        return $result;
+    }
+
     private function generateConstant(Constant $constant, array &$ir, array $globalVars): string
     {
         // Define known constants
         $constantValues = [
             'PATHINFO_FILENAME' => 8,  // PHP's PATHINFO_FILENAME constant value
         ];
+
+        // Check for null constant
+        if (strtolower($constant->name) === 'null') {
+            $result = $this->getNextTempVariable();
+            $ir[] = "  {$result} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_null(%struct.zval* {$result})";
+            return $result;
+        }
 
         $value = $constantValues[$constant->name] ?? 0;
 
@@ -1546,6 +1825,11 @@ class Generator
         $loopBodyBlock = "foreach_body_" . $blockCounter;
         $loopAfterBlock = "foreach_after_" . $blockCounter;
 
+        // Variables are pre-declared in the entry block via collectAndDeclareVariables
+        // We just need to track the variable names for use in this method
+        $valueVarName = $foreachStmt->valueVar->name;
+        $keyVarName = $foreachStmt->keyVar !== null ? $foreachStmt->keyVar->name : null;
+
         // Get the array expression
         $arrayPtr = $this->generateExpression($foreachStmt->array, $ir, $globalVars);
 
@@ -1557,23 +1841,6 @@ class Generator
         // Get array size
         $arraySize = $this->getNextTempVariable();
         $ir[] = "  {$arraySize} = call i32 @php_array_size(%struct.zval* {$arrayPtr})";
-
-        // Declare the value variable if not already declared
-        $valueVarName = $foreachStmt->valueVar->name;
-        if (!isset($this->declaredVars[$valueVarName])) {
-            $ir[] = "  %{$valueVarName} = alloca %struct.zval";
-            $this->declaredVars[$valueVarName] = true;
-        }
-
-        // Declare the key variable if present and not already declared
-        $keyVarName = null;
-        if ($foreachStmt->keyVar !== null) {
-            $keyVarName = $foreachStmt->keyVar->name;
-            if (!isset($this->declaredVars[$keyVarName])) {
-                $ir[] = "  %{$keyVarName} = alloca %struct.zval";
-                $this->declaredVars[$keyVarName] = true;
-            }
-        }
 
         // Jump to loop header
         $ir[] = "  br label %{$loopHeaderBlock}";
@@ -1760,7 +2027,7 @@ class Generator
 
         $result = $this->getNextTempVariable();
         $ir[] = "  {$result} = alloca %struct.zval";
-        $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* {$ptrName})";
+        $ir[] = "  call void @php_zval_string_literal(%struct.zval* {$result}, i8* {$ptrName})";
         return $result;
     }
 
@@ -1834,7 +2101,7 @@ class Generator
     {
         $replacements = [
             '\\' => '\\\\',
-            '"' => '\\"',
+            '"' => '\22',
             '\n' => '\\n',
             '\r' => '\\r',
             '\t' => '\\t',

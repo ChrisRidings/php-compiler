@@ -16,8 +16,12 @@ class StringLiteral extends Expression
 
     public static function fromQuotedString(string $quotedValue, int $line = 1, int $column = 1): self
     {
-        // Extract value between quotes
-        $trimmed = trim($quotedValue, '\'"');
+        // Extract value between quotes - only remove matching outer quotes
+        $firstChar = $quotedValue[0] ?? '';
+        $trimmed = $quotedValue;
+        if ($firstChar === "'" || $firstChar === '"') {
+            $trimmed = trim($quotedValue, $firstChar);
+        }
 
         // Find the actual end of the string (before any semicolon or other characters)
         $value = $trimmed;
@@ -51,8 +55,12 @@ class StringLiteral extends Expression
      */
     public static function parseDoubleQuoted(string $quotedValue, int $line = 1, int $column = 1): Expression
     {
-        // Extract value between quotes
-        $trimmed = trim($quotedValue, '"');
+        // Extract value between quotes - only remove matching outer quotes
+        $firstChar = $quotedValue[0] ?? '';
+        $trimmed = $quotedValue;
+        if ($firstChar === "'" || $firstChar === '"') {
+            $trimmed = trim($quotedValue, $firstChar);
+        }
 
         // Find the actual end of the string (before any semicolon or other characters)
         $value = $trimmed;

@@ -61,6 +61,7 @@ enum TokenType: int
     case T_FALSE = 53;           // false
     case T_NOT = 54;             // ! (boolean NOT)
     case T_CONTINUE = 55;        // continue
+    case T_NULL = 56;            // null
 }
 
 class Token

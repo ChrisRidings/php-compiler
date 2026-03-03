@@ -14,6 +14,7 @@ use PhpCompiler\AST\VariableReference;
 use PhpCompiler\AST\Assignment;
 use PhpCompiler\AST\IntegerLiteral;
 use PhpCompiler\AST\BooleanLiteral;
+use PhpCompiler\AST\NullLiteral;
 use PhpCompiler\AST\UnaryOperation;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\ContinueStatement;
@@ -800,6 +801,9 @@ class Parser
         } elseif ($token->type === TokenType::T_FALSE) {
             $this->consumeToken();
             return new BooleanLiteral(false, $token->line, $token->column);
+        } elseif ($token->type === TokenType::T_NULL) {
+            $this->consumeToken();
+            return new NullLiteral($token->line, $token->column);
         } elseif ($token->type === TokenType::T_LBRACKET) {
             // Array literal [elem1, elem2, ...]
             return $this->parseArrayLiteral();

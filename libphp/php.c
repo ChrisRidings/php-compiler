@@ -7,6 +7,64 @@
 // Thread-local buffer index for php_zval_to_string
 _Thread_local int zval_buffer_index = 0;
 
+// Process escape sequences in a string (\n -> newline, \\ -> \, etc.)
+static char* process_escape_sequences(const char* input) {
+    if (!input) return NULL;
+
+    size_t len = strlen(input);
+    char* result = (char*)malloc(len + 1);
+    if (!result) return NULL;
+
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (input[i] == '\\' && i + 1 < len) {
+            switch (input[i + 1]) {
+                case 'n':
+                    result[j++] = '\n';
+                    i++;
+                    break;
+                case 't':
+                    result[j++] = '\t';
+                    i++;
+                    break;
+                case 'r':
+                    result[j++] = '\r';
+                    i++;
+                    break;
+                case 'b':
+                    result[j++] = '\b';
+                    i++;
+                    break;
+                case 'f':
+                    result[j++] = '\f';
+                    i++;
+                    break;
+                case '"':
+                    result[j++] = '"';
+                    i++;
+                    break;
+                case '\'':
+                    result[j++] = '\'';
+                    i++;
+                    break;
+                case '\\':
+                    result[j++] = '\\';
+                    i++;
+                    break;
+                default:
+                    // Unknown escape sequence, keep the backslash and char
+                    result[j++] = input[i];
+                    break;
+            }
+        } else {
+            result[j++] = input[i];
+        }
+    }
+    result[j] = '\0';
+
+    return result;
+}
+
 // Zval creation functions
 void php_zval_null(zval* z) {
     z->type = PHP_TYPE_NULL;
@@ -29,6 +87,18 @@ void php_zval_string(zval* z, const char* str) {
     // but it's necessary to avoid dangling pointers from temporary buffers
     if (str) {
         z->value.str_val = strdup(str);
+    } else {
+        z->value.str_val = NULL;
+    }
+}
+
+// Store a PHP string literal with escape sequence processing
+void php_zval_string_literal(zval* z, const char* str) {
+    z->type = PHP_TYPE_STRING;
+    // Process escape sequences (\n -> newline, \" -> ", etc.)
+    // This is used for PHP string literals from the compiler
+    if (str) {
+        z->value.str_val = process_escape_sequences(str);
     } else {
         z->value.str_val = NULL;
     }
@@ -86,53 +156,11 @@ void php_echo(const char* str) {
         return;
     }
 
+    // Strings stored in zvals already have escape sequences processed,
+    // so we just print them as-is
     while (*str) {
-        if (*str == '\\') {
-            str++;
-            switch (*str) {
-                case 'n':
-                    putchar('\n');
-                    str++;
-                    break;
-                case 't':
-                    putchar('\t');
-                    str++;
-                    break;
-                case 'r':
-                    putchar('\r');
-                    str++;
-                    break;
-                case 'b':
-                    putchar('\b');
-                    str++;
-                    break;
-                case 'f':
-                    putchar('\f');
-                    str++;
-                    break;
-                case '"':
-                    putchar('"');
-                    str++;
-                    break;
-                case '\'':
-                    putchar('\'');
-                    str++;
-                    break;
-                case '\\':
-                    putchar('\\');
-                    str++;
-                    break;
-                default:
-                    putchar('\\');
-                    // If it's an unrecognized escape sequence, just print it as-is
-                    putchar(*str);
-                    str++;
-                    break;
-            }
-        } else {
-            putchar(*str);
-            str++;
-        }
+        putchar(*str);
+        str++;
     }
 }
 
@@ -143,6 +171,9 @@ char* php_itoa(int num) {
 }
 
 char* php_concat_strings(const char* str1, const char* str2) {
+    // Note: Strings passed here are already processed (escape sequences converted)
+    // when they come from zvals. We just do a simple concatenation.
+
     // Calculate required size
     size_t len1 = str1 ? strlen(str1) : 0;
     size_t len2 = str2 ? strlen(str2) : 0;
@@ -162,6 +193,27 @@ char* php_concat_strings(const char* str1, const char* str2) {
     }
 
     return result;
+}
+
+// Debug function to print string contents
+void php_debug_print_string(const char* label, const char* str) {
+    fprintf(stderr, "[DEBUG] %s: [", label);
+    if (str) {
+        for (const char* p = str; *p; p++) {
+            if (*p == '"') {
+                fprintf(stderr, "\"");
+            } else if (*p == '\\') {
+                fprintf(stderr, "\\\\");
+            } else if (*p == '\n') {
+                fprintf(stderr, "\\n");
+            } else if (*p == '\t') {
+                fprintf(stderr, "\\t");
+            } else {
+                fputc(*p, stderr);
+            }
+        }
+    }
+    fprintf(stderr, "]\n");
 }
 
 // Array implementation
@@ -713,6 +765,131 @@ void php_str_repeat(zval* str, zval* count, zval* result) {
     free(output);
 }
 
+// trim implementation - removes whitespace from both ends (including null bytes like PHP)
+void php_trim(zval* str, zval* result) {
+    if (str->type != PHP_TYPE_STRING || str->value.str_val == NULL) {
+        php_zval_string(result, "");
+        return;
+    }
+
+    const char* input = str->value.str_val;
+    size_t len = strlen(input);
+
+    // Find first non-whitespace character
+    // PHP trim removes: space (0x20), tab (0x09), newline (0x0a), carriage return (0x0d),
+    // null (0x00), vertical tab (0x0b), form feed (0x0c)
+    size_t start = 0;
+    while (start < len && ((unsigned char)input[start] == 0x20 ||  // space
+                           (unsigned char)input[start] == 0x09 ||  // tab
+                           (unsigned char)input[start] == 0x0a ||  // newline \n
+                           (unsigned char)input[start] == 0x0d ||  // carriage return \r
+                           (unsigned char)input[start] == 0x00 ||  // null \0
+                           (unsigned char)input[start] == 0x0b ||  // vertical tab
+                           (unsigned char)input[start] == 0x0c)) {  // form feed
+        start++;
+    }
+
+    // Find last non-whitespace character
+    size_t end = len;
+    while (end > start && ((unsigned char)input[end - 1] == 0x20 ||  // space
+                           (unsigned char)input[end - 1] == 0x09 ||  // tab
+                           (unsigned char)input[end - 1] == 0x0a ||  // newline \n
+                           (unsigned char)input[end - 1] == 0x0d ||  // carriage return \r
+                           (unsigned char)input[end - 1] == 0x00 ||  // null \0
+                           (unsigned char)input[end - 1] == 0x0b ||  // vertical tab
+                           (unsigned char)input[end - 1] == 0x0c)) {  // form feed
+        end--;
+    }
+
+    // Calculate trimmed length
+    size_t trimmed_len = end - start;
+
+    // Allocate and copy trimmed string
+    char* output = (char*)malloc(trimmed_len + 1);
+    if (!output) {
+        php_zval_string(result, "");
+        return;
+    }
+
+    strncpy(output, input + start, trimmed_len);
+    output[trimmed_len] = '\0';
+
+    php_zval_string(result, output);
+    free(output);
+}
+
+// str_replace implementation - replaces all occurrences of search with replace in subject
+void php_str_replace(zval* search, zval* replace, zval* subject, zval* result) {
+    if (subject->type != PHP_TYPE_STRING || subject->value.str_val == NULL) {
+        php_zval_string(result, "");
+        return;
+    }
+
+    const char* search_str = "";
+    if (search->type == PHP_TYPE_STRING && search->value.str_val != NULL) {
+        search_str = search->value.str_val;
+    }
+
+    const char* replace_str = "";
+    if (replace->type == PHP_TYPE_STRING && replace->value.str_val != NULL) {
+        replace_str = replace->value.str_val;
+    }
+
+    const char* subject_str = subject->value.str_val;
+    size_t search_len = strlen(search_str);
+    size_t replace_len = strlen(replace_str);
+    size_t subject_len = strlen(subject_str);
+
+    // If search is empty, return subject unchanged
+    if (search_len == 0) {
+        php_zval_string(result, subject_str);
+        return;
+    }
+
+    // Count occurrences
+    size_t count = 0;
+    const char* tmp = subject_str;
+    while ((tmp = strstr(tmp, search_str)) != NULL) {
+        count++;
+        tmp += search_len;
+    }
+
+    // Calculate result size
+    size_t result_len = subject_len + count * (replace_len - search_len);
+
+    // Allocate result buffer
+    char* output = (char*)malloc(result_len + 1);
+    if (!output) {
+        php_zval_string(result, "");
+        return;
+    }
+
+    // Build result string
+    char* dst = output;
+    const char* src = subject_str;
+    const char* match;
+
+    while ((match = strstr(src, search_str)) != NULL) {
+        // Copy text before match
+        size_t prefix_len = match - src;
+        memcpy(dst, src, prefix_len);
+        dst += prefix_len;
+
+        // Copy replacement
+        memcpy(dst, replace_str, replace_len);
+        dst += replace_len;
+
+        // Move past the match
+        src = match + search_len;
+    }
+
+    // Copy remaining text after last match
+    strcpy(dst, src);
+
+    php_zval_string(result, output);
+    free(output);
+}
+
 // file_exists implementation
 void php_file_exists(zval* path, zval* result) {
     if (path->type != PHP_TYPE_STRING || path->value.str_val == NULL) {
@@ -933,6 +1110,20 @@ void php_rename(zval* oldname, zval* newname, zval* result) {
     php_zval_bool(result, success ? 1 : 0);
 }
 
+// Helper to strip shell redirection from command
+static char* strip_shell_redirection(const char* cmd) {
+    char* result = strdup(cmd);
+    if (!result) return NULL;
+
+    // Find " 2>" or " 2>&1" at the end and truncate
+    char* redirect = strstr(result, " 2>");
+    if (redirect) {
+        *redirect = '\0';
+    }
+
+    return result;
+}
+
 // shell_exec implementation - Windows compatible
 void php_shell_exec(zval* cmd, zval* result) {
     if (cmd->type != PHP_TYPE_STRING || cmd->value.str_val == NULL) {
@@ -941,15 +1132,101 @@ void php_shell_exec(zval* cmd, zval* result) {
     }
 
     #ifdef _WIN32
-    // Windows: use _popen
-    // Note: If the executable path contains spaces, the caller should quote it
-    // e.g., shell_exec('"C:/Program Files/.../app.exe" arg1 arg2')
-    FILE* fp = _popen(cmd->value.str_val, "r");
+    // Windows: Use CreateProcessA for better control over command line parsing
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+
+    HANDLE hRead, hWrite;
+    if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Ensure the read handle is not inherited
+    SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
+    PROCESS_INFORMATION pi;
+    STARTUPINFOA si;
+    ZeroMemory(&pi, sizeof(PROCESS_INFORMATION));
+    ZeroMemory(&si, sizeof(STARTUPINFOA));
+    si.cb = sizeof(STARTUPINFOA);
+    si.hStdError = hWrite;
+    si.hStdOutput = hWrite;
+    si.dwFlags |= STARTF_USESTDHANDLES;
+
+    // Strip shell redirection syntax (2>&1, etc.) since we handle redirection ourselves
+    char* clean_cmd = strip_shell_redirection(cmd->value.str_val);
+    if (!clean_cmd) {
+        CloseHandle(hRead);
+        CloseHandle(hWrite);
+        php_zval_null(result);
+        return;
+    }
+
+    // Create the command line - must be mutable for CreateProcessA
+    char* cmdline = clean_cmd; // Use cleaned command directly (already allocated)
+
+    BOOL success = CreateProcessA(
+        NULL,           // Application name (NULL = use command line)
+        cmdline,        // Command line
+        NULL,           // Process security attributes
+        NULL,           // Thread security attributes
+        TRUE,           // Inherit handles
+        0,              // Creation flags
+        NULL,           // Environment
+        NULL,           // Current directory
+        &si,            // Startup info
+        &pi             // Process information
+    );
+
+    free(cmdline);  // Free the cleaned command line after use (was allocated by strip_shell_redirection)
+
+    if (!success) {
+        CloseHandle(hRead);
+        CloseHandle(hWrite);
+        php_zval_null(result);
+        return;
+    }
+
+    // Close the write end of the pipe in the parent
+    CloseHandle(hWrite);
+
+    // Read the output
+    char buffer[1024];
+    size_t output_size = 0;
+    char* output = malloc(1);
+    output[0] = '\0';
+    DWORD bytesRead;
+
+    while (ReadFile(hRead, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
+        buffer[bytesRead] = '\0';
+        size_t len = bytesRead;
+        char* new_output = realloc(output, output_size + len + 1);
+        if (!new_output) {
+            free(output);
+            CloseHandle(hRead);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            php_zval_null(result);
+            return;
+        }
+        output = new_output;
+        memcpy(output + output_size, buffer, len + 1);
+        output_size += len;
+    }
+
+    // Wait for the process to complete
+    WaitForSingleObject(pi.hProcess, INFINITE);
+
+    CloseHandle(hRead);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
     #else
     // POSIX: use popen
     FILE* fp = popen(cmd->value.str_val, "r");
-    #endif
-
     if (fp == NULL) {
         php_zval_null(result);
         return;
@@ -959,15 +1236,6 @@ void php_shell_exec(zval* cmd, zval* result) {
     char buffer[1024];
     size_t output_size = 0;
     char* output = malloc(1);
-    if (!output) {
-        #ifdef _WIN32
-        _pclose(fp);
-        #else
-        pclose(fp);
-        #endif
-        php_zval_null(result);
-        return;
-    }
     output[0] = '\0';
 
     while (fgets(buffer, sizeof(buffer), fp) != NULL) {
@@ -975,11 +1243,7 @@ void php_shell_exec(zval* cmd, zval* result) {
         char* new_output = realloc(output, output_size + len + 1);
         if (!new_output) {
             free(output);
-            #ifdef _WIN32
-            _pclose(fp);
-            #else
             pclose(fp);
-            #endif
             php_zval_null(result);
             return;
         }
@@ -988,16 +1252,11 @@ void php_shell_exec(zval* cmd, zval* result) {
         output_size += len;
     }
 
-    #ifdef _WIN32
-    _pclose(fp);
-    #else
     pclose(fp);
     #endif
 
-    // Store result (trim trailing newline if present, matching PHP behavior)
-    if (output_size > 0 && output[output_size - 1] == '\n') {
-        output[output_size - 1] = '\0';
-    }
+    // PHP's shell_exec does NOT trim trailing newlines - it returns raw output
+    // We store the output exactly as received from the command
 
     php_zval_string(result, output);
     free(output);
