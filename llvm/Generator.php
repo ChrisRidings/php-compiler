@@ -36,6 +36,8 @@ use PhpCompiler\AST\ClassDefinition;
 use PhpCompiler\AST\PropertyDeclaration;
 use PhpCompiler\AST\NewExpression;
 use PhpCompiler\AST\PropertyAccess;
+use PhpCompiler\AST\MethodDefinition;
+use PhpCompiler\AST\MethodCall;
 
 class Generator
 {
@@ -50,10 +52,22 @@ class Generator
     private array $declaredVars = [];
 
     /**
+     * Track variable types (class names for objects)
+     * @var array<string, string>
+     */
+    private array $variableTypes = [];
+
+    /**
      * Stack to track loop header blocks for continue statements
      * @var string[]
      */
     private array $loopHeaderStack = [];
+
+    /**
+     * Class definitions for method lookup
+     * @var array<string, ClassDefinition>
+     */
+    private array $classDefinitions = [];
 
     public function __construct(array $statements)
     {
@@ -132,7 +146,14 @@ class Generator
         $ir[] = "declare void @exit(i32) noreturn";
         $ir[] = "";
 
-        // Collect all global string constants first
+        // First pass: collect class definitions for method lookup
+        foreach ($this->statements as $statement) {
+            if ($statement instanceof ClassDefinition) {
+                $this->classDefinitions[$statement->name] = $statement;
+            }
+        }
+
+        // Collect all global string constants
         foreach ($this->statements as $statement) {
             $this->collectGlobals($statement, $globalVars);
         }
@@ -148,13 +169,16 @@ class Generator
 
         $ir[] = "";
 
-        // Separate statements into function definitions and other statements
+        // Separate statements into function definitions, class definitions, and other statements
         $functionDefinitions = [];
+        $classDefinitions = [];
         $otherStatements = [];
 
         foreach ($this->statements as $statement) {
             if ($statement instanceof FunctionDefinition) {
                 $functionDefinitions[] = $statement;
+            } elseif ($statement instanceof ClassDefinition) {
+                $classDefinitions[] = $statement;
             } else {
                 $otherStatements[] = $statement;
             }
@@ -163,6 +187,11 @@ class Generator
         // Generate function definitions
         foreach ($functionDefinitions as $funcDef) {
             $this->generateStatement($funcDef, $ir, $globalVars);
+        }
+
+        // Generate class definitions (which generate method functions)
+        foreach ($classDefinitions as $classDef) {
+            $this->generateStatement($classDef, $ir, $globalVars);
         }
 
          // Define main function
@@ -221,6 +250,13 @@ class Generator
         } elseif ($node instanceof FunctionDefinition) {
             foreach ($node->body as $statement) {
                 $this->collectGlobals($statement, $globalVars);
+            }
+        } elseif ($node instanceof ClassDefinition) {
+            // Collect globals from method bodies
+            foreach ($node->methods as $method) {
+                foreach ($method->body as $statement) {
+                    $this->collectGlobals($statement, $globalVars);
+                }
             }
         } elseif ($node instanceof FunctionCall) {
             foreach ($node->arguments as $arg) {
@@ -321,6 +357,12 @@ class Generator
             }
             // Also collect from the object expression
             $this->collectGlobals($node->object, $globalVars);
+        } elseif ($node instanceof MethodCall) {
+            // Collect from the object expression and arguments
+            $this->collectGlobals($node->object, $globalVars);
+            foreach ($node->arguments as $arg) {
+                $this->collectGlobals($arg, $globalVars);
+            }
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
@@ -508,8 +550,13 @@ class Generator
             // Expression statement - evaluate the expression and discard the result
             $this->generateExpression($statement->expression, $ir, $globalVars);
         } elseif ($statement instanceof ClassDefinition) {
-            // Class definitions are handled at parse time - no runtime code needed
-            // Properties are per-instance, created when 'new' is called
+            // Store class definition for method lookup
+            $this->classDefinitions[$statement->name] = $statement;
+
+            // Generate method functions
+            foreach ($statement->methods as $method) {
+                $this->generateMethodFunction($statement->name, $method, $ir, $globalVars);
+            }
         } elseif ($statement instanceof PropertyDeclaration) {
             // Property declarations inside classes are handled at parse time
             // Default values are set when 'new' creates the object
@@ -573,6 +620,11 @@ class Generator
             $this->declaredVars[$varName] = true;
         }
 
+        // Track variable type if assigning a new object
+        if ($assignment->value instanceof NewExpression) {
+            $this->variableTypes[$varName] = $assignment->value->className;
+        }
+
         if ($assignment->operator === '=') {
             // Simple assignment
             $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
@@ -625,6 +677,11 @@ class Generator
         if (!isset($this->declaredVars[$varName])) {
             $ir[] = "  %{$varName} = alloca %struct.zval";
             $this->declaredVars[$varName] = true;
+        }
+
+        // Track variable type if assigning a new object
+        if ($assignment->value instanceof NewExpression) {
+            $this->variableTypes[$varName] = $assignment->value->className;
         }
 
         // Generate the value expression
@@ -752,6 +809,74 @@ class Generator
         $ir[] = "";
 
         // Restore declaredVars for main scope
+        $this->declaredVars = $savedDeclaredVars;
+    }
+
+    private function generateMethodFunction(string $className, MethodDefinition $method, array &$ir, array $globalVars): void
+    {
+        // Save and reset declaredVars for method scope
+        $savedDeclaredVars = $this->declaredVars;
+        $this->declaredVars = [];
+
+        // Method name is prefixed with class name: ClassName_methodName
+        $methodFuncName = $className . '_' . $method->name;
+
+        // All methods return zval and parameters are zval
+        // First parameter is always $this (the object pointer)
+        $paramTypes = ['%struct.zval*']; // $this parameter
+        foreach ($method->parameters as $param) {
+            $paramTypes[] = '%struct.zval';
+        }
+        $paramTypesStr = implode(', ', $paramTypes);
+
+        $ir[] = "define %struct.zval @{$methodFuncName}({$paramTypesStr}) {";
+        $ir[] = "entry:";
+
+        // Pre-declare all local variables in the entry block
+        $this->collectAndDeclareVariables($method->body, $ir);
+
+        // Add $this to declared vars (it's the first parameter, a pointer)
+        $this->declaredVars['this'] = true;
+
+        // Allocate stack space for $this parameter
+        $ir[] = "  %this = alloca %struct.zval*";
+        $ir[] = "  store %struct.zval* %0, %struct.zval** %this";
+
+        // Allocate stack space for other parameters
+        foreach ($method->parameters as $i => $param) {
+            $ir[] = "  %{$param->name} = alloca %struct.zval";
+            $ir[] = "  store %struct.zval %{" . ($i + 1) . "}, %struct.zval* %{$param->name}";
+            $this->declaredVars[$param->name] = true;
+        }
+
+        // Generate method body statements
+        foreach ($method->body as $statement) {
+            $this->generateStatement($statement, $ir, $globalVars, true);
+        }
+
+        // Check if method has explicit return
+        $hasReturn = false;
+        foreach ($method->body as $statement) {
+            if ($statement instanceof ReturnStatement) {
+                $hasReturn = true;
+                break;
+            }
+        }
+
+        // If no return statement, return null
+        if (!$hasReturn) {
+            $nullResult = $this->getNextTempVariable();
+            $ir[] = "  {$nullResult} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_null(%struct.zval* {$nullResult})";
+            $loaded = $this->getNextTempVariable();
+            $ir[] = "  {$loaded} = load %struct.zval, %struct.zval* {$nullResult}";
+            $ir[] = "  ret %struct.zval {$loaded}";
+        }
+
+        $ir[] = "}";
+        $ir[] = "";
+
+        // Restore declaredVars for parent scope
         $this->declaredVars = $savedDeclaredVars;
     }
 
@@ -1520,6 +1645,8 @@ class Generator
             return $this->generateNewExpression($expression, $ir, $globalVars);
         } elseif ($expression instanceof PropertyAccess) {
             return $this->generatePropertyAccess($expression, $ir, $globalVars);
+        } elseif ($expression instanceof MethodCall) {
+            return $this->generateMethodCall($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -2088,6 +2215,14 @@ class Generator
     {
         $varName = $varRef->name;
 
+        // Special handling for $this
+        if ($varName === 'this') {
+            // $this is stored as a pointer to pointer, we need to load it
+            $thisPtr = $this->getNextTempVariable();
+            $ir[] = "  {$thisPtr} = load %struct.zval*, %struct.zval** %this";
+            return $thisPtr;
+        }
+
         // Check if variable is declared
         if (!isset($this->declaredVars[$varName])) {
             // Variable not declared - this shouldn't happen for proper PHP code
@@ -2240,6 +2375,54 @@ class Generator
 
         // Call php_object_property_get to get the property value
         $ir[] = "  call void @php_object_property_get(%struct.zval* {$result}, %struct.zval* {$objPtr}, i8* {$propNamePtr})";
+
+        return $result;
+    }
+
+    private function generateMethodCall(MethodCall $methodCall, array &$ir, array $globalVars): string
+    {
+        // Generate the object expression to get the object pointer
+        $objPtr = $this->generateExpression($methodCall->object, $ir, $globalVars);
+
+        // Get the class name from the object variable
+        // For now, we use a simple heuristic: look up the variable name in our type map
+        $className = null;
+        if ($methodCall->object instanceof VariableReference) {
+            $varName = $methodCall->object->name;
+            $className = $this->variableTypes[$varName] ?? null;
+        }
+
+        // If we can't determine the class, use a generic approach
+        // For now, we'll just call a function with the method name and class prefix
+        if ($className === null) {
+            // Fallback: try to use the method name directly (for simple cases)
+            $methodName = $methodCall->methodName;
+        } else {
+            $methodName = $className . '_' . $methodCall->methodName;
+        }
+
+        // Build argument list - first argument is $this (the object)
+        $args = [];
+        $args[] = "%struct.zval* {$objPtr}";
+
+        // Generate arguments
+        foreach ($methodCall->arguments as $arg) {
+            $argPtr = $this->generateExpression($arg, $ir, $globalVars);
+            $argVal = $this->getNextTempVariable();
+            $ir[] = "  {$argVal} = load %struct.zval, %struct.zval* {$argPtr}";
+            $args[] = "%struct.zval {$argVal}";
+        }
+
+        $argStr = implode(', ', $args);
+
+        // Allocate result
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+
+        // Call the method function
+        $callResult = $this->getNextTempVariable();
+        $ir[] = "  {$callResult} = call %struct.zval @{$methodName}({$argStr})";
+        $ir[] = "  store %struct.zval {$callResult}, %struct.zval* {$result}";
 
         return $result;
     }

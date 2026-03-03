@@ -33,6 +33,8 @@ use PhpCompiler\AST\ClassDefinition;
 use PhpCompiler\AST\PropertyDeclaration;
 use PhpCompiler\AST\NewExpression;
 use PhpCompiler\AST\PropertyAccess;
+use PhpCompiler\AST\MethodDefinition;
+use PhpCompiler\AST\MethodCall;
 
 class Parser
 {
@@ -200,10 +202,32 @@ class Parser
         $this->consumeTokenOfType(TokenType::T_LBRACE);
 
         $properties = [];
+        $methods = [];
 
-        // Parse class body (properties for now)
+        // Parse class body (properties and methods)
         while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
-            $properties[] = $this->parsePropertyDeclaration();
+            $token = $this->currentToken();
+
+            // Check if it's a method (visibility + function)
+            if ($token && in_array($token->type, [TokenType::T_PUBLIC, TokenType::T_PRIVATE, TokenType::T_PROTECTED])) {
+                // Peek ahead to see if it's a function
+                $peekToken = $this->peekToken();
+                if ($peekToken && $peekToken->type === TokenType::T_FUNCTION) {
+                    $methods[] = $this->parseMethodDefinition();
+                } else {
+                    // It's a property
+                    $properties[] = $this->parsePropertyDeclaration();
+                }
+            } elseif ($token && $token->type === TokenType::T_FUNCTION) {
+                // Method without visibility (treat as public)
+                $methods[] = $this->parseMethodDefinition();
+            } elseif ($token && $token->type === TokenType::T_VAR) {
+                // Property with var keyword
+                $properties[] = $this->parsePropertyDeclaration();
+            } else {
+                // Assume it's a property declaration
+                $properties[] = $this->parsePropertyDeclaration();
+            }
         }
 
         $this->consumeTokenOfType(TokenType::T_RBRACE);
@@ -211,8 +235,53 @@ class Parser
         return new ClassDefinition(
             $nameToken->value,
             $properties,
+            $methods,
             $classToken->line,
             $classToken->column
+        );
+    }
+
+    private function parseMethodDefinition(): MethodDefinition
+    {
+        $token = $this->currentToken();
+        $visibility = 'public';
+
+        // Parse visibility modifier (optional)
+        if ($token && in_array($token->type, [TokenType::T_PUBLIC, TokenType::T_PRIVATE, TokenType::T_PROTECTED])) {
+            if ($token->type === TokenType::T_PUBLIC) {
+                $visibility = 'public';
+            } elseif ($token->type === TokenType::T_PRIVATE) {
+                $visibility = 'private';
+            } elseif ($token->type === TokenType::T_PROTECTED) {
+                $visibility = 'protected';
+            }
+            $this->consumeToken();
+            $token = $this->currentToken();
+        }
+
+        // Consume 'function' keyword
+        $functionToken = $this->consumeTokenOfType(TokenType::T_FUNCTION);
+
+        $nameToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        $parameters = $this->parseParameters();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+        $this->consumeTokenOfType(TokenType::T_LBRACE);
+
+        $body = $this->parseFunctionBody();
+
+        $this->consumeTokenOfType(TokenType::T_RBRACE);
+
+        return new MethodDefinition(
+            $nameToken->value,
+            $parameters,
+            $body,
+            $visibility,
+            false, // isStatic - not implemented yet
+            $functionToken->line,
+            $functionToken->column
         );
     }
 
@@ -923,11 +992,21 @@ class Parser
                 return $expression;
             }
 
-            // Handle property access: $obj->property
+            // Handle property access: $obj->property or method call: $obj->method()
             while ($this->currentToken() && $this->currentToken()->type === TokenType::T_OBJECT_OPERATOR) {
                 $this->consumeToken(); // consume ->
                 $propertyToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
-                $expression = new PropertyAccess($expression, $propertyToken->value, $token->line, $token->column);
+
+                // Check if it's a method call (followed by parentheses)
+                if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LPAREN) {
+                    $this->consumeToken(); // consume (
+                    $arguments = $this->parseArguments();
+                    $this->consumeTokenOfType(TokenType::T_RPAREN);
+                    $expression = new MethodCall($expression, $propertyToken->value, $arguments, $token->line, $token->column);
+                } else {
+                    // It's a property access
+                    $expression = new PropertyAccess($expression, $propertyToken->value, $token->line, $token->column);
+                }
             }
 
             return $expression;
