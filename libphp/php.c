@@ -195,64 +195,6 @@ char* php_concat_strings(const char* str1, const char* str2) {
     return result;
 }
 
-// Debug function to print string contents
-void php_debug_print_string(const char* label, const char* str) {
-    fprintf(stderr, "[DEBUG] %s: [", label);
-    if (str) {
-        for (const char* p = str; *p; p++) {
-            if (*p == '"') {
-                fprintf(stderr, "\"");
-            } else if (*p == '\\') {
-                fprintf(stderr, "\\\\");
-            } else if (*p == '\n') {
-                fprintf(stderr, "\\n");
-            } else if (*p == '\t') {
-                fprintf(stderr, "\\t");
-            } else {
-                fputc(*p, stderr);
-            }
-        }
-    }
-    fprintf(stderr, "]\n");
-}
-
-// Debug function to print zval details
-void php_debug_print_zval(const char* label, const zval* z) {
-    fprintf(stderr, "[DEBUG] %s: type=", label);
-    switch (z->type) {
-        case PHP_TYPE_NULL:
-            fprintf(stderr, "NULL");
-            break;
-        case PHP_TYPE_BOOL:
-            fprintf(stderr, "BOOL(%d)", z->value.bool_val);
-            break;
-        case PHP_TYPE_INT:
-            fprintf(stderr, "INT(%d)", z->value.int_val);
-            break;
-        case PHP_TYPE_STRING:
-            fprintf(stderr, "STRING(");
-            if (z->value.str_val) {
-                for (const char* p = z->value.str_val; *p; p++) {
-                    if (*p == '"') fprintf(stderr, "\"");
-                    else if (*p == '\\') fprintf(stderr, "\\\\");
-                    else if (*p == '\n') fprintf(stderr, "\\n");
-                    else if (*p == '\r') fprintf(stderr, "\\r");
-                    else if (*p == '\t') fprintf(stderr, "\\t");
-                    else fprintf(stderr, "%c", *p);
-                }
-            } else {
-                fprintf(stderr, "null");
-            }
-            fprintf(stderr, ")");
-            break;
-        case PHP_TYPE_ARRAY:
-            fprintf(stderr, "ARRAY");
-            break;
-        default:
-            fprintf(stderr, "UNKNOWN(%d)", z->type);
-    }
-    fprintf(stderr, "\n");
-}
 
 // Array implementation
 #define PHP_ARRAY_INITIAL_CAPACITY 8
@@ -805,9 +747,7 @@ void php_str_repeat(zval* str, zval* count, zval* result) {
 
 // trim implementation - removes whitespace from both ends (including null bytes like PHP)
 void php_trim(zval* str, zval* result) {
-    fprintf(stderr, "[DEBUG] php_trim called: input type=%d\n", str->type);
     if (str->type != PHP_TYPE_STRING || str->value.str_val == NULL) {
-        fprintf(stderr, "[DEBUG] php_trim: input not string or NULL, returning empty string\n");
         php_zval_string(result, "");
         return;
     }
@@ -998,24 +938,8 @@ void php_zval_strict_ne(zval* a, zval* b, zval* result) {
 
 // Strict equality comparison (===)
 void php_zval_strict_eq(zval* a, zval* b, zval* result) {
-    // Debug pointer addresses
-    fprintf(stderr, "[DEBUG] strict_eq: a=%p, b=%p\n", (void*)a, (void*)b);
-    // Read raw bytes from memory to see what's actually there
-    unsigned char* a_bytes = (unsigned char*)a;
-    unsigned char* b_bytes = (unsigned char*)b;
-    fprintf(stderr, "[DEBUG] strict_eq: a bytes: %02x %02x %02x %02x %02x %02x %02x %02x\n",
-            a_bytes[0], a_bytes[1], a_bytes[2], a_bytes[3],
-            a_bytes[4], a_bytes[5], a_bytes[6], a_bytes[7]);
-    fprintf(stderr, "[DEBUG] strict_eq: b bytes: %02x %02x %02x %02x %02x %02x %02x %02x\n",
-            b_bytes[0], b_bytes[1], b_bytes[2], b_bytes[3],
-            b_bytes[4], b_bytes[5], b_bytes[6], b_bytes[7]);
-    fprintf(stderr, "[DEBUG] strict_eq: a->type=%d (at %p), b->type=%d (at %p)\n",
-            a->type, (void*)&a->type, b->type, (void*)&b->type);
     // If types are different, they are not identical
     if (a->type != b->type) {
-        fprintf(stderr, "[DEBUG] strict_eq: TYPE MISMATCH a->type=%d, b->type=%d\n", a->type, b->type);
-        php_debug_print_zval("  a", a);
-        php_debug_print_zval("  b", b);
         php_zval_bool(result, 0);  // false - not identical
         return;
     }
@@ -1037,24 +961,9 @@ void php_zval_strict_eq(zval* a, zval* b, zval* result) {
             if (a->value.str_val == NULL && b->value.str_val == NULL) {
                 equal = 1;
             } else if (a->value.str_val == NULL || b->value.str_val == NULL) {
-                fprintf(stderr, "[DEBUG] strict_eq: STRING NULL MISMATCH a->str_val=%p, b->str_val=%p\n",
-                        (void*)a->value.str_val, (void*)b->value.str_val);
                 equal = 0;
             } else {
-                // Compare string lengths first
-                int len_a = 0, len_b = 0;
-                if (a->value.str_val) len_a = strlen(a->value.str_val);
-                if (b->value.str_val) len_b = strlen(b->value.str_val);
-
-                fprintf(stderr, "[DEBUG] strict_eq: string len_a=%d, len_b=%d\n", len_a, len_b);
-
-                int cmp = strcmp(a->value.str_val, b->value.str_val);
-                if (cmp != 0) {
-                    fprintf(stderr, "[DEBUG] strict_eq: STRING CONTENT MISMATCH strcmp=%d\n", cmp);
-                    fprintf(stderr, "  a->str_val=[%s] (len=%d)\n", a->value.str_val, len_a);
-                    fprintf(stderr, "  b->str_val=[%s] (len=%d)\n", b->value.str_val, len_b);
-                }
-                equal = (cmp == 0);
+                equal = (strcmp(a->value.str_val, b->value.str_val) == 0);
             }
             break;
         case PHP_TYPE_ARRAY:
@@ -1198,12 +1107,9 @@ static char* strip_shell_redirection(const char* cmd) {
 // shell_exec implementation - Windows compatible
 void php_shell_exec(zval* cmd, zval* result) {
     if (cmd->type != PHP_TYPE_STRING || cmd->value.str_val == NULL) {
-        fprintf(stderr, "[DEBUG] shell_exec: cmd is not a string or is NULL\n");
         php_zval_null(result);
         return;
     }
-
-    fprintf(stderr, "[DEBUG] shell_exec: running command: [%s]\n", cmd->value.str_val);
 
     #ifdef _WIN32
     // Windows: Use CreateProcessA for better control over command line parsing
@@ -1214,7 +1120,6 @@ void php_shell_exec(zval* cmd, zval* result) {
 
     HANDLE hRead, hWrite;
     if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
-        fprintf(stderr, "[DEBUG] shell_exec: CreatePipe failed\n");
         php_zval_null(result);
         return;
     }
@@ -1259,7 +1164,6 @@ void php_shell_exec(zval* cmd, zval* result) {
     free(cmdline);  // Free the cleaned command line after use (was allocated by strip_shell_redirection)
 
     if (!success) {
-        fprintf(stderr, "[DEBUG] shell_exec: CreateProcessA failed, error=%lu\n", GetLastError());
         CloseHandle(hRead);
         CloseHandle(hWrite);
         php_zval_null(result);
@@ -1334,8 +1238,6 @@ void php_shell_exec(zval* cmd, zval* result) {
     // PHP's shell_exec does NOT trim trailing newlines - it returns raw output
     // We store the output exactly as received from the command
 
-    fprintf(stderr, "[DEBUG] shell_exec: output_size=%zu, output=[%s]\n", output_size, output);
     php_zval_string(result, output);
-    fprintf(stderr, "[DEBUG] shell_exec: result type after php_zval_string=%d\n", result->type);
     free(output);
 }
