@@ -2,6 +2,8 @@
 
 A PHP-to-native compiler that translates PHP code into LLVM IR and compiles it to executable machine code.
 
+Note: this is currently a prototype/PoC. It can compile some code but you won't be able to do a lot with it.
+
 ## Overview
 
 This project implements a compiler for a subset of PHP, translating PHP source code into LLVM Intermediate Representation (IR) which is then compiled to native executables using the LLVM toolchain. The compiler includes:
@@ -245,7 +247,6 @@ typedef struct {
 
 This is a prototype compiler implementation. Notable limitations:
 
-- No support for PHP's dynamic typing (requires type hints)
 - Limited standard library coverage
 - **Windows only** - uses Windows APIs in runtime library
 - No garbage collection (memory leaks possible)
