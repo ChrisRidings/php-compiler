@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace PhpCompiler\AST;
 
-class Assignment extends Expression
+class PropertyAccess extends Expression
 {
     public function __construct(
-        public Expression $variable,
-        public readonly string $operator,
-        public readonly Expression $value,
+        public readonly Expression $object,
+        public readonly string $propertyName,
         int $line = 1,
         int $column = 1
     ) {
@@ -18,6 +17,7 @@ class Assignment extends Expression
 
     public function __toString(): string
     {
-        return "Assignment(variable: {$this->variable}, operator: {$this->operator}, value: {$this->value})";
+        return sprintf("PropertyAccess(object: %s, property: '%s')",
+            (string)$this->object, $this->propertyName);
     }
 }

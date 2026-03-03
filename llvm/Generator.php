@@ -32,6 +32,10 @@ use PhpCompiler\AST\ForeachStatement;
 use PhpCompiler\AST\DeclareStatement;
 use PhpCompiler\AST\ExpressionStatement;
 use PhpCompiler\AST\Constant;
+use PhpCompiler\AST\ClassDefinition;
+use PhpCompiler\AST\PropertyDeclaration;
+use PhpCompiler\AST\NewExpression;
+use PhpCompiler\AST\PropertyAccess;
 
 class Generator
 {
@@ -122,6 +126,9 @@ class Generator
         $ir[] = "declare void @php_rename(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_unlink(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_str_replace(%struct.zval*, %struct.zval*, %struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_object_create(%struct.zval*, i8*)";
+        $ir[] = "declare void @php_object_property_get(%struct.zval*, %struct.zval*, i8*)";
+        $ir[] = "declare void @php_object_property_set(%struct.zval*, i8*, %struct.zval*)";
         $ir[] = "declare void @exit(i32) noreturn";
         $ir[] = "";
 
@@ -288,6 +295,32 @@ class Generator
             // Boolean literals don't have string constants to collect
         } elseif ($node instanceof NullLiteral) {
             // Null literals don't have string constants to collect
+        } elseif ($node instanceof NewExpression) {
+            // Collect class name as a string constant
+            $className = $node->className;
+            $globalName = "__str_const_" . md5($className);
+            if (!isset($globalVars[$globalName])) {
+                $escapedValue = $this->escapeString($className);
+                $globalVars[$globalName] = [
+                    'value' => $className,
+                    'escapedValue' => $escapedValue,
+                    'length' => strlen($className)
+                ];
+            }
+        } elseif ($node instanceof PropertyAccess) {
+            // Collect property name as a string constant
+            $propName = $node->propertyName;
+            $globalName = "__str_const_" . md5($propName);
+            if (!isset($globalVars[$globalName])) {
+                $escapedValue = $this->escapeString($propName);
+                $globalVars[$globalName] = [
+                    'value' => $propName,
+                    'escapedValue' => $escapedValue,
+                    'length' => strlen($propName)
+                ];
+            }
+            // Also collect from the object expression
+            $this->collectGlobals($node->object, $globalVars);
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
@@ -346,7 +379,12 @@ class Generator
     private function collectVariablesFromNode(Node $node, array &$varNames): void
     {
         if ($node instanceof Assignment) {
-            $varNames[$node->variable->name] = true;
+            // For property assignments ($obj->prop = value), collect variables from the object expression
+            if ($node->variable instanceof PropertyAccess) {
+                $this->collectVariablesFromNode($node->variable->object, $varNames);
+            } else {
+                $varNames[$node->variable->name] = true;
+            }
             $this->collectVariablesFromNode($node->value, $varNames);
         } elseif ($node instanceof ArrayAssignment) {
             $this->collectVariablesFromNode($node->arrayAccess, $varNames);
@@ -469,6 +507,12 @@ class Generator
         } elseif ($statement instanceof ExpressionStatement) {
             // Expression statement - evaluate the expression and discard the result
             $this->generateExpression($statement->expression, $ir, $globalVars);
+        } elseif ($statement instanceof ClassDefinition) {
+            // Class definitions are handled at parse time - no runtime code needed
+            // Properties are per-instance, created when 'new' is called
+        } elseif ($statement instanceof PropertyDeclaration) {
+            // Property declarations inside classes are handled at parse time
+            // Default values are set when 'new' creates the object
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -513,6 +557,12 @@ class Generator
 
     private function generateAssignment(Assignment $assignment, array &$ir, array $globalVars): void
     {
+        // Check if this is a property assignment: $obj->property = value
+        if ($assignment->variable instanceof PropertyAccess) {
+            $this->generatePropertyAssignment($assignment, $ir, $globalVars);
+            return;
+        }
+
         // All variables are stored as zval structs on the stack
         $varName = $assignment->variable->name;
 
@@ -562,6 +612,11 @@ class Generator
 
     private function generateAssignmentExpression(Assignment $assignment, array &$ir, array $globalVars): string
     {
+        // Check if this is a property assignment: $obj->property = value
+        if ($assignment->variable instanceof PropertyAccess) {
+            return $this->generatePropertyAssignmentExpression($assignment, $ir, $globalVars);
+        }
+
         // All variables are stored as zval structs on the stack
         $varName = $assignment->variable->name;
 
@@ -1461,6 +1516,10 @@ class Generator
             return $this->generateArrayAccess($expression, $ir, $globalVars);
         } elseif ($expression instanceof Assignment) {
             return $this->generateAssignmentExpression($expression, $ir, $globalVars);
+        } elseif ($expression instanceof NewExpression) {
+            return $this->generateNewExpression($expression, $ir, $globalVars);
+        } elseif ($expression instanceof PropertyAccess) {
+            return $this->generatePropertyAccess($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -1665,10 +1724,10 @@ class Generator
         $loopBodyBlock = "loop_body_" . $blockCounter;
         $loopAfterBlock = "loop_after_" . $blockCounter;
 
-        // Get all variable names from initializations
+        // Get all variable names from initializations (skip property assignments)
         $loopVarNames = [];
         foreach ($forStmt->initializations as $init) {
-            if ($init instanceof Assignment) {
+            if ($init instanceof Assignment && !$init->variable instanceof PropertyAccess) {
                 $loopVarNames[] = $init->variable->name;
             }
         }
@@ -1684,12 +1743,17 @@ class Generator
         // Generate all initialization statements
         foreach ($forStmt->initializations as $init) {
             if ($init instanceof Assignment) {
-                $varName = $init->variable->name;
-                $valuePtr = $this->generateExpression($init->value, $ir, $globalVars);
+                // Check if it's a property assignment
+                if ($init->variable instanceof PropertyAccess) {
+                    $this->generatePropertyAssignment($init, $ir, $globalVars);
+                } else {
+                    $varName = $init->variable->name;
+                    $valuePtr = $this->generateExpression($init->value, $ir, $globalVars);
 
-                $value = $this->getNextTempVariable();
-                $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
-                $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
+                    $value = $this->getNextTempVariable();
+                    $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
+                    $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
+                }
             } else {
                 $this->generateStatement($init, $ir, $globalVars);
             }
@@ -2115,6 +2179,144 @@ class Generator
         $ir[] = "  call void @php_array_get(%struct.zval* {$result}, %struct.zval* {$arrayPtr}, %struct.zval* {$indexPtr})";
 
         return $result;
+    }
+
+    private function generateNewExpression(NewExpression $newExpr, array &$ir, array $globalVars): string
+    {
+        // Allocate result zval
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+
+        // Get the class name as a string constant
+        $className = $newExpr->className;
+        $globalName = "__str_const_" . md5($className);
+
+        // Check if we need to create the global string constant
+        if (!isset($globalVars[$globalName])) {
+            $escapedValue = $this->escapeString($className);
+            $globalVars[$globalName] = [
+                'value' => $className,
+                'escapedValue' => $escapedValue,
+                'length' => strlen($className)
+            ];
+        }
+
+        $globalData = $globalVars[$globalName];
+        $classNamePtr = $this->getNextTempVariable();
+        $ir[] = "  {$classNamePtr} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+
+        // Call php_object_create to create the object
+        $ir[] = "  call void @php_object_create(%struct.zval* {$result}, i8* {$classNamePtr})";
+
+        return $result;
+    }
+
+    private function generatePropertyAccess(PropertyAccess $propAccess, array &$ir, array $globalVars): string
+    {
+        // Generate the object expression
+        $objPtr = $this->generateExpression($propAccess->object, $ir, $globalVars);
+
+        // Allocate result zval
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+
+        // Get the property name as a string constant
+        $propName = $propAccess->propertyName;
+        $globalName = "__str_const_" . md5($propName);
+
+        // Check if we need to create the global string constant
+        if (!isset($globalVars[$globalName])) {
+            $escapedValue = $this->escapeString($propName);
+            $globalVars[$globalName] = [
+                'value' => $propName,
+                'escapedValue' => $escapedValue,
+                'length' => strlen($propName)
+            ];
+        }
+
+        $globalData = $globalVars[$globalName];
+        $propNamePtr = $this->getNextTempVariable();
+        $ir[] = "  {$propNamePtr} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+
+        // Call php_object_property_get to get the property value
+        $ir[] = "  call void @php_object_property_get(%struct.zval* {$result}, %struct.zval* {$objPtr}, i8* {$propNamePtr})";
+
+        return $result;
+    }
+
+    private function generatePropertyAssignment(Assignment $assignment, array &$ir, array $globalVars): void
+    {
+        /** @var PropertyAccess $propAccess */
+        $propAccess = $assignment->variable;
+
+        // Generate the object expression
+        $objPtr = $this->generateExpression($propAccess->object, $ir, $globalVars);
+
+        // Generate the value expression
+        $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+
+        // Get the property name as a string constant
+        $propName = $propAccess->propertyName;
+        $globalName = "__str_const_" . md5($propName);
+
+        // Check if we need to create the global string constant
+        if (!isset($globalVars[$globalName])) {
+            $escapedValue = $this->escapeString($propName);
+            $globalVars[$globalName] = [
+                'value' => $propName,
+                'escapedValue' => $escapedValue,
+                'length' => strlen($propName)
+            ];
+        }
+
+        $globalData = $globalVars[$globalName];
+        $propNamePtr = $this->getNextTempVariable();
+        $ir[] = "  {$propNamePtr} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+
+        // Call php_object_property_set to set the property value
+        $ir[] = "  call void @php_object_property_set(%struct.zval* {$objPtr}, i8* {$propNamePtr}, %struct.zval* {$valuePtr})";
+    }
+
+    private function generatePropertyAssignmentExpression(Assignment $assignment, array &$ir, array $globalVars): string
+    {
+        /** @var PropertyAccess $propAccess */
+        $propAccess = $assignment->variable;
+
+        // Generate the object expression
+        $objPtr = $this->generateExpression($propAccess->object, $ir, $globalVars);
+
+        // Generate the value expression
+        $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+
+        // Get the property name as a string constant
+        $propName = $propAccess->propertyName;
+        $globalName = "__str_const_" . md5($propName);
+
+        // Check if we need to create the global string constant
+        if (!isset($globalVars[$globalName])) {
+            $escapedValue = $this->escapeString($propName);
+            $globalVars[$globalName] = [
+                'value' => $propName,
+                'escapedValue' => $escapedValue,
+                'length' => strlen($propName)
+            ];
+        }
+
+        $globalData = $globalVars[$globalName];
+        $propNamePtr = $this->getNextTempVariable();
+        $ir[] = "  {$propNamePtr} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
+
+        // Call php_object_property_set to set the property value
+        $ir[] = "  call void @php_object_property_set(%struct.zval* {$objPtr}, i8* {$propNamePtr}, %struct.zval* {$valuePtr})";
+
+        // Return a pointer to the assigned value (for use in parent expressions)
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $loadedVal = $this->getNextTempVariable();
+        $ir[] = "  {$loadedVal} = load %struct.zval, %struct.zval* {$valuePtr}";
+        $ir[] = "  store %struct.zval {$loadedVal}, %struct.zval* {$resultPtr}";
+
+        return $resultPtr;
     }
 
     private function escapeString(string $str): string

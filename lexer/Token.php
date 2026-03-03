@@ -62,6 +62,13 @@ enum TokenType: int
     case T_NOT = 54;             // ! (boolean NOT)
     case T_CONTINUE = 55;        // continue
     case T_NULL = 56;            // null
+    case T_CLASS = 57;           // class
+    case T_PUBLIC = 58;          // public
+    case T_PRIVATE = 59;         // private
+    case T_PROTECTED = 60;       // protected
+    case T_NEW = 61;             // new
+    case T_OBJECT_OPERATOR = 62; // ->
+    case T_VAR = 63;             // var (for compatibility)
 }
 
 class Token

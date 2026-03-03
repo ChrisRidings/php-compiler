@@ -33,6 +33,10 @@ require_once __DIR__ . '/../ast/ArrayAssignment.php';
 require_once __DIR__ . '/../ast/ForeachStatement.php';
 require_once __DIR__ . '/../ast/DeclareStatement.php';
 require_once __DIR__ . '/../ast/ExpressionStatement.php';
+require_once __DIR__ . '/../ast/ClassDefinition.php';
+require_once __DIR__ . '/../ast/PropertyDeclaration.php';
+require_once __DIR__ . '/../ast/NewExpression.php';
+require_once __DIR__ . '/../ast/PropertyAccess.php';
 require_once __DIR__ . '/../ast/Parser.php';
 require_once __DIR__ . '/Generator.php';
 

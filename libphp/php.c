@@ -1241,3 +1241,77 @@ void php_shell_exec(zval* cmd, zval* result) {
     php_zval_string(result, output);
     free(output);
 }
+
+// Object implementation
+#define PHP_OBJECT_INITIAL_PROP_CAPACITY 8
+
+void php_object_create(zval* z, const char* class_name) {
+    z->type = PHP_TYPE_OBJECT;
+
+    php_object* obj = (php_object*)malloc(sizeof(php_object));
+    if (!obj) return;
+
+    obj->class_name = strdup(class_name);
+    obj->property_count = 0;
+    obj->property_capacity = PHP_OBJECT_INITIAL_PROP_CAPACITY;
+    obj->properties = (php_property*)malloc(sizeof(php_property) * obj->property_capacity);
+
+    if (!obj->properties) {
+        free(obj->class_name);
+        free(obj);
+        return;
+    }
+
+    z->value.obj_val = obj;
+}
+
+static php_property* php_object_find_property(php_object* obj, const char* property_name) {
+    for (int i = 0; i < obj->property_count; i++) {
+        if (strcmp(obj->properties[i].name, property_name) == 0) {
+            return &obj->properties[i];
+        }
+    }
+    return NULL;
+}
+
+void php_object_property_get(zval* result, zval* obj_zval, const char* property_name) {
+    php_zval_null(result);
+
+    if (obj_zval->type != PHP_TYPE_OBJECT) return;
+
+    php_object* obj = obj_zval->value.obj_val;
+    if (!obj) return;
+
+    php_property* prop = php_object_find_property(obj, property_name);
+    if (prop) {
+        *result = prop->value;
+    }
+    // If property not found, return null (PHP behavior for undefined properties)
+}
+
+void php_object_property_set(zval* obj_zval, const char* property_name, zval* value) {
+    if (obj_zval->type != PHP_TYPE_OBJECT) return;
+
+    php_object* obj = obj_zval->value.obj_val;
+    if (!obj) return;
+
+    // Check if property already exists
+    php_property* prop = php_object_find_property(obj, property_name);
+    if (prop) {
+        prop->value = *value;
+        return;
+    }
+
+    // Add new property
+    if (obj->property_count >= obj->property_capacity) {
+        obj->property_capacity *= 2;
+        php_property* new_props = (php_property*)realloc(obj->properties,
+            sizeof(php_property) * obj->property_capacity);
+        if (!new_props) return;
+        obj->properties = new_props;
+    }
+
+    obj->properties[obj->property_count].name = strdup(property_name);
+    obj->properties[obj->property_count].value = *value;
+    obj->property_count++;
+}

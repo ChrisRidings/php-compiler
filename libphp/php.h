@@ -18,11 +18,13 @@ typedef enum {
     PHP_TYPE_BOOL,
     PHP_TYPE_INT,
     PHP_TYPE_STRING,
-    PHP_TYPE_ARRAY
+    PHP_TYPE_ARRAY,
+    PHP_TYPE_OBJECT
 } php_type_t;
 
-// Forward declaration for array
-typedef struct php_array php_array;
+// Forward declarations
+struct php_property;
+struct php_object;
 
 // Zval struct representing a dynamically typed value
 typedef struct {
@@ -32,8 +34,23 @@ typedef struct {
         int int_val;            // for PHP_TYPE_INT
         char* str_val;          // for PHP_TYPE_STRING (null-terminated)
         long long ptr_val;      // for PHP_TYPE_ARRAY (stores array pointer)
+        struct php_object* obj_val;    // for PHP_TYPE_OBJECT
     } value;
 } zval;
+
+// Object property storage (key-value pair)
+typedef struct php_property {
+    char* name;
+    zval value;
+} php_property;
+
+// Object structure representing a PHP object
+typedef struct php_object {
+    char* class_name;
+    php_property* properties;  // Array of properties
+    int property_count;
+    int property_capacity;
+} php_object;
 
 /**
  * Creates a null zval.
@@ -323,6 +340,32 @@ void php_zval_strict_eq(zval* a, zval* b, zval* result);
  * @param z The zval to print
  */
 void php_debug_print_zval(const char* label, const zval* z);
+
+/**
+ * Creates a new object of the specified class.
+ *
+ * @param z The zval to initialize as an object
+ * @param class_name The class name for the object
+ */
+void php_object_create(zval* z, const char* class_name);
+
+/**
+ * Gets a property from an object.
+ *
+ * @param result The zval to store the result in
+ * @param obj The object zval
+ * @param property_name The property name to get
+ */
+void php_object_property_get(zval* result, zval* obj, const char* property_name);
+
+/**
+ * Sets a property on an object.
+ *
+ * @param obj The object zval
+ * @param property_name The property name to set
+ * @param value The value to set
+ */
+void php_object_property_set(zval* obj, const char* property_name, zval* value);
 
 #ifdef __cplusplus
 }

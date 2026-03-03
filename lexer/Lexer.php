@@ -31,6 +31,12 @@ class Lexer
         TokenType::T_FALSE->value => '/^false\b/i',
         TokenType::T_CONTINUE->value => '/^continue\b/i',
         TokenType::T_NULL->value => '/^null\b/i',
+        TokenType::T_CLASS->value => '/^class\b/i',
+        TokenType::T_PUBLIC->value => '/^public\b/i',
+        TokenType::T_PRIVATE->value => '/^private\b/i',
+        TokenType::T_PROTECTED->value => '/^protected\b/i',
+        TokenType::T_NEW->value => '/^new\b/i',
+        TokenType::T_VAR->value => '/^var\b/i',
         // String literals - simple pattern that matches anything between quotes
         // Double-quoted strings can have escaped quotes, single-quoted treat \' as escape
         TokenType::T_STRING->value => '/^(?:"[^"]*"|\'[^\']*\')/',
@@ -54,6 +60,7 @@ class Lexer
         TokenType::T_NOT_EQUAL->value => '/^!=/',
         TokenType::T_ASSIGN->value => '/^=/',
         TokenType::T_NOT->value => '/^!/',
+        TokenType::T_OBJECT_OPERATOR->value => '/^->/',
         TokenType::T_PLUS_PLUS->value => '/^\+\+/',
         TokenType::T_MINUS_MINUS->value => '/^--/',
         TokenType::T_ASSIGN_PLUS->value => '/^\+=/',

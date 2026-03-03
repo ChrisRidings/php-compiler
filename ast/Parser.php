@@ -29,6 +29,10 @@ use PhpCompiler\AST\ArrayAssignment;
 use PhpCompiler\AST\ForeachStatement;
 use PhpCompiler\AST\ExpressionStatement;
 use PhpCompiler\AST\Constant;
+use PhpCompiler\AST\ClassDefinition;
+use PhpCompiler\AST\PropertyDeclaration;
+use PhpCompiler\AST\NewExpression;
+use PhpCompiler\AST\PropertyAccess;
 
 class Parser
 {
@@ -138,6 +142,12 @@ class Parser
                 $this->consumeToken();
             }
             return new ContinueStatement($continueToken->line, $continueToken->column);
+        } elseif ($token->type === TokenType::T_CLASS) {
+            // Class definition
+            return $this->parseClassDefinition();
+        } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_OBJECT_OPERATOR) {
+            // Property access: $obj->property (potentially with assignment)
+            return $this->parsePropertyAccessStatement();
         }
 
         // Provide better error information
@@ -180,6 +190,122 @@ class Parser
             $functionToken->line,
             $functionToken->column
         );
+    }
+
+    private function parseClassDefinition(): ClassDefinition
+    {
+        $classToken = $this->consumeToken(); // Consume 'class'
+
+        $nameToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
+        $this->consumeTokenOfType(TokenType::T_LBRACE);
+
+        $properties = [];
+
+        // Parse class body (properties for now)
+        while ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RBRACE) {
+            $properties[] = $this->parsePropertyDeclaration();
+        }
+
+        $this->consumeTokenOfType(TokenType::T_RBRACE);
+
+        return new ClassDefinition(
+            $nameToken->value,
+            $properties,
+            $classToken->line,
+            $classToken->column
+        );
+    }
+
+    private function parsePropertyDeclaration(): PropertyDeclaration
+    {
+        $token = $this->currentToken();
+
+        // Parse visibility modifier
+        $visibility = 'public'; // default
+        if ($token && in_array($token->type, [TokenType::T_PUBLIC, TokenType::T_PRIVATE, TokenType::T_PROTECTED, TokenType::T_VAR])) {
+            if ($token->type === TokenType::T_PUBLIC) {
+                $visibility = 'public';
+            } elseif ($token->type === TokenType::T_PRIVATE) {
+                $visibility = 'private';
+            } elseif ($token->type === TokenType::T_PROTECTED) {
+                $visibility = 'protected';
+            }
+            // T_VAR is treated as public
+            $this->consumeToken();
+            $token = $this->currentToken();
+        }
+
+        // Parse variable name
+        if (!$token || $token->type !== TokenType::T_VARIABLE) {
+            throw new \RuntimeException("Expected property name at line {$token->line}, column {$token->column}");
+        }
+        $varToken = $this->consumeToken();
+        $propertyName = ltrim($varToken->value, '$');
+
+        // Check for default value
+        $defaultValue = null;
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_ASSIGN) {
+            $this->consumeToken(); // Consume =
+            $defaultValue = $this->parseExpression();
+        }
+
+        // Consume semicolon
+        $this->consumeTokenOfType(TokenType::T_SEMICOLON);
+
+        return new PropertyDeclaration(
+            $visibility,
+            $propertyName,
+            $defaultValue,
+            $varToken->line,
+            $varToken->column
+        );
+    }
+
+    private function parsePropertyAccessStatement(): Statement
+    {
+        // Parse the property access expression (e.g., $obj->property)
+        $propAccess = $this->parsePrimary();
+
+        // Check if this is an assignment
+        if ($this->currentToken() && in_array($this->currentToken()->type, [
+            TokenType::T_ASSIGN,
+            TokenType::T_ASSIGN_PLUS,
+            TokenType::T_ASSIGN_MINUS,
+            TokenType::T_ASSIGN_MULTIPLY,
+            TokenType::T_ASSIGN_DIVIDE
+        ])) {
+            // It's an assignment to a property
+            $opToken = $this->consumeToken();
+            $operator = match ($opToken->type) {
+                TokenType::T_ASSIGN => '=',
+                TokenType::T_ASSIGN_PLUS => '+=',
+                TokenType::T_ASSIGN_MINUS => '-=',
+                TokenType::T_ASSIGN_MULTIPLY => '*=',
+                TokenType::T_ASSIGN_DIVIDE => '/=',
+                default => '=',
+            };
+
+            $value = $this->parseExpression();
+
+            // Consume semicolon if present
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+                $this->consumeToken();
+            }
+
+            return new ExpressionStatement(
+                new Assignment($propAccess, $operator, $value, $propAccess->line, $propAccess->column),
+                $propAccess->line,
+                $propAccess->column
+            );
+        }
+
+        // It's just a property access expression (no assignment)
+        // Consume semicolon if present
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+            $this->consumeToken();
+        }
+
+        return new ExpressionStatement($propAccess, $propAccess->line, $propAccess->column);
     }
 
     private function parseParameters(): array
@@ -741,6 +867,11 @@ class Parser
             return new UnaryOperation(UnaryOperation::OP_NOT, $operand, $notToken->line, $notToken->column);
         }
 
+        // Handle new expression: new ClassName()
+        if ($token->type === TokenType::T_NEW) {
+            return $this->parseNewExpression();
+        }
+
         // Handle assignment as expression: $var = expr
         if ($token->type === TokenType::T_VARIABLE && $this->peekToken() &&
             ($this->peekToken()->type === TokenType::T_ASSIGN ||
@@ -791,6 +922,14 @@ class Parser
                 // but for now, let's just return the variable since we don't handle it yet
                 return $expression;
             }
+
+            // Handle property access: $obj->property
+            while ($this->currentToken() && $this->currentToken()->type === TokenType::T_OBJECT_OPERATOR) {
+                $this->consumeToken(); // consume ->
+                $propertyToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
+                $expression = new PropertyAccess($expression, $propertyToken->value, $token->line, $token->column);
+            }
+
             return $expression;
         } elseif ($token->type === TokenType::T_INTEGER) {
             $this->consumeToken();
@@ -868,6 +1007,28 @@ class Parser
         $this->consumeTokenOfType(TokenType::T_RBRACKET);
 
         return new ArrayLiteral($elements, $keys, $token->line, $token->column);
+    }
+
+    private function parseNewExpression(): NewExpression
+    {
+        $newToken = $this->consumeToken(); // Consume 'new'
+
+        $classNameToken = $this->consumeTokenOfType(TokenType::T_IDENTIFIER);
+
+        // Parse constructor arguments (optional, for future support)
+        $arguments = [];
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LPAREN) {
+            $this->consumeToken(); // Consume (
+            $arguments = $this->parseArguments();
+            $this->consumeTokenOfType(TokenType::T_RPAREN);
+        }
+
+        return new NewExpression(
+            $classNameToken->value,
+            $arguments,
+            $newToken->line,
+            $newToken->column
+        );
     }
 
     private function consumeTokenOfType(TokenType $type): Token
