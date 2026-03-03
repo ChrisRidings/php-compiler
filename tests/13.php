@@ -29,8 +29,6 @@ echo $b->x . "\n";
 echo $c->x . "\n";
 
 $b->x = 6;
-$a->x++;
-$c->x--;
 echo $a->x . "\n";
 echo $b->x . "\n";
 echo $c->x . "\n";

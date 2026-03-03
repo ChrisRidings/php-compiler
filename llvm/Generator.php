@@ -2435,9 +2435,6 @@ class Generator
         // Generate the object expression
         $objPtr = $this->generateExpression($propAccess->object, $ir, $globalVars);
 
-        // Generate the value expression
-        $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
-
         // Get the property name as a string constant
         $propName = $propAccess->propertyName;
         $globalName = "__str_const_" . md5($propName);
@@ -2456,8 +2453,51 @@ class Generator
         $propNamePtr = $this->getNextTempVariable();
         $ir[] = "  {$propNamePtr} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
 
-        // Call php_object_property_set to set the property value
-        $ir[] = "  call void @php_object_property_set(%struct.zval* {$objPtr}, i8* {$propNamePtr}, %struct.zval* {$valuePtr})";
+        if ($assignment->operator === '=') {
+            // Simple assignment - just set the property
+            $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+            $ir[] = "  call void @php_object_property_set(%struct.zval* {$objPtr}, i8* {$propNamePtr}, %struct.zval* {$valuePtr})";
+        } else {
+            // Compound assignment (+=, -=, *=, /=)
+            // First, get the current property value
+            $currentValPtr = $this->getNextTempVariable();
+            $ir[] = "  {$currentValPtr} = alloca %struct.zval";
+            $ir[] = "  call void @php_object_property_get(%struct.zval* {$currentValPtr}, %struct.zval* {$objPtr}, i8* {$propNamePtr})";
+
+            // Get current value as integer
+            $currentInt = $this->getNextTempVariable();
+            $ir[] = "  {$currentInt} = call i32 @php_zval_to_int(%struct.zval* {$currentValPtr})";
+
+            // Generate the value expression
+            $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+            $valueInt = $this->getNextTempVariable();
+            $ir[] = "  {$valueInt} = call i32 @php_zval_to_int(%struct.zval* {$valuePtr})";
+
+            // Compute the result
+            $resultInt = $this->getNextTempVariable();
+            switch ($assignment->operator) {
+                case '+=':
+                    $ir[] = "  {$resultInt} = add i32 {$currentInt}, {$valueInt}";
+                    break;
+                case '-=':
+                    $ir[] = "  {$resultInt} = sub i32 {$currentInt}, {$valueInt}";
+                    break;
+                case '*=':
+                    $ir[] = "  {$resultInt} = mul i32 {$currentInt}, {$valueInt}";
+                    break;
+                case '/=':
+                    $ir[] = "  {$resultInt} = sdiv i32 {$currentInt}, {$valueInt}";
+                    break;
+            }
+
+            // Store result in a zval
+            $resultPtr = $this->getNextTempVariable();
+            $ir[] = "  {$resultPtr} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$resultInt})";
+
+            // Set the property to the new value
+            $ir[] = "  call void @php_object_property_set(%struct.zval* {$objPtr}, i8* {$propNamePtr}, %struct.zval* {$resultPtr})";
+        }
     }
 
     private function generatePropertyAssignmentExpression(Assignment $assignment, array &$ir, array $globalVars): string
@@ -2468,9 +2508,6 @@ class Generator
         // Generate the object expression
         $objPtr = $this->generateExpression($propAccess->object, $ir, $globalVars);
 
-        // Generate the value expression
-        $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
-
         // Get the property name as a string constant
         $propName = $propAccess->propertyName;
         $globalName = "__str_const_" . md5($propName);
@@ -2489,17 +2526,62 @@ class Generator
         $propNamePtr = $this->getNextTempVariable();
         $ir[] = "  {$propNamePtr} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
 
-        // Call php_object_property_set to set the property value
-        $ir[] = "  call void @php_object_property_set(%struct.zval* {$objPtr}, i8* {$propNamePtr}, %struct.zval* {$valuePtr})";
+        if ($assignment->operator === '=') {
+            // Simple assignment - just set the property
+            $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+            $ir[] = "  call void @php_object_property_set(%struct.zval* {$objPtr}, i8* {$propNamePtr}, %struct.zval* {$valuePtr})";
 
-        // Return a pointer to the assigned value (for use in parent expressions)
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
-        $loadedVal = $this->getNextTempVariable();
-        $ir[] = "  {$loadedVal} = load %struct.zval, %struct.zval* {$valuePtr}";
-        $ir[] = "  store %struct.zval {$loadedVal}, %struct.zval* {$resultPtr}";
+            // Return a pointer to the assigned value
+            $resultPtr = $this->getNextTempVariable();
+            $ir[] = "  {$resultPtr} = alloca %struct.zval";
+            $loadedVal = $this->getNextTempVariable();
+            $ir[] = "  {$loadedVal} = load %struct.zval, %struct.zval* {$valuePtr}";
+            $ir[] = "  store %struct.zval {$loadedVal}, %struct.zval* {$resultPtr}";
+            return $resultPtr;
+        } else {
+            // Compound assignment (+=, -=, *=, /=)
+            // First, get the current property value
+            $currentValPtr = $this->getNextTempVariable();
+            $ir[] = "  {$currentValPtr} = alloca %struct.zval";
+            $ir[] = "  call void @php_object_property_get(%struct.zval* {$currentValPtr}, %struct.zval* {$objPtr}, i8* {$propNamePtr})";
 
-        return $resultPtr;
+            // Get current value as integer
+            $currentInt = $this->getNextTempVariable();
+            $ir[] = "  {$currentInt} = call i32 @php_zval_to_int(%struct.zval* {$currentValPtr})";
+
+            // Generate the value expression
+            $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+            $valueInt = $this->getNextTempVariable();
+            $ir[] = "  {$valueInt} = call i32 @php_zval_to_int(%struct.zval* {$valuePtr})";
+
+            // Compute the result
+            $resultInt = $this->getNextTempVariable();
+            switch ($assignment->operator) {
+                case '+=':
+                    $ir[] = "  {$resultInt} = add i32 {$currentInt}, {$valueInt}";
+                    break;
+                case '-=':
+                    $ir[] = "  {$resultInt} = sub i32 {$currentInt}, {$valueInt}";
+                    break;
+                case '*=':
+                    $ir[] = "  {$resultInt} = mul i32 {$currentInt}, {$valueInt}";
+                    break;
+                case '/=':
+                    $ir[] = "  {$resultInt} = sdiv i32 {$currentInt}, {$valueInt}";
+                    break;
+            }
+
+            // Store result in a zval
+            $resultPtr = $this->getNextTempVariable();
+            $ir[] = "  {$resultPtr} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$resultInt})";
+
+            // Set the property to the new value
+            $ir[] = "  call void @php_object_property_set(%struct.zval* {$objPtr}, i8* {$propNamePtr}, %struct.zval* {$resultPtr})";
+
+            // Return a pointer to the result value
+            return $resultPtr;
+        }
     }
 
     private function escapeString(string $str): string

@@ -5,5 +5,6 @@ class A {
         echo "hi";
     }
 }
+
 $a = new A();
 $a->hello();

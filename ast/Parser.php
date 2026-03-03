@@ -1009,6 +1009,14 @@ class Parser
                 }
             }
 
+            // Handle postfix increment/decrement on property accesses and variables
+            if ($this->currentToken() && in_array($this->currentToken()->type, [TokenType::T_PLUS_PLUS, TokenType::T_MINUS_MINUS])) {
+                $operatorToken = $this->consumeToken();
+                $operator = ($operatorToken->type === TokenType::T_PLUS_PLUS) ? '+=' : '-=';
+                // Convert to assignment: $expr += 1 or $expr -= 1
+                $expression = new Assignment($expression, $operator, new IntegerLiteral(1, $operatorToken->line, $operatorToken->column), $token->line, $token->column);
+            }
+
             return $expression;
         } elseif ($token->type === TokenType::T_INTEGER) {
             $this->consumeToken();
