@@ -149,6 +149,9 @@ class Parser
         } elseif ($token->type === TokenType::T_CLASS) {
             // Class definition
             return $this->parseClassDefinition();
+        } elseif ($token->type === TokenType::T_UNSET) {
+            // unset() statement
+            return $this->parseUnsetStatement();
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_OBJECT_OPERATOR) {
             // Property access: $obj->property (potentially with assignment)
             return $this->parsePropertyAccessStatement();
@@ -1012,6 +1015,11 @@ class Parser
             return $this->parseIssetExpression();
         }
 
+        // Handle unset() construct
+        if ($token->type === TokenType::T_UNSET) {
+            return $this->parseUnsetExpression();
+        }
+
         // Handle assignment as expression: $var = expr
         if ($token->type === TokenType::T_VARIABLE && $this->peekToken() &&
             ($this->peekToken()->type === TokenType::T_ASSIGN ||
@@ -1274,6 +1282,51 @@ class Parser
             $issetToken->line,
             $issetToken->column
         );
+    }
+
+    private function parseUnsetExpression(): FunctionCall
+    {
+        $unsetToken = $this->consumeToken(); // Consume 'unset'
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        // Parse the variable argument
+        $argument = $this->parseExpression();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        // Return as a FunctionCall node - the LLVM generator will handle it specially
+        return new FunctionCall(
+            'unset',
+            [$argument],
+            $unsetToken->line,
+            $unsetToken->column
+        );
+    }
+
+    private function parseUnsetStatement(): ExpressionStatement
+    {
+        $unsetToken = $this->consumeToken(); // Consume 'unset'
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        // Parse the variable argument
+        $argument = $this->parseExpression();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        // Consume semicolon if present
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+            $this->consumeToken();
+        }
+
+        // Return as an ExpressionStatement wrapping a FunctionCall
+        $funcCall = new FunctionCall(
+            'unset',
+            [$argument],
+            $unsetToken->line,
+            $unsetToken->column
+        );
+
+        return new ExpressionStatement($funcCall, $unsetToken->line, $unsetToken->column);
     }
 
     private function consumeTokenOfType(TokenType $type): Token

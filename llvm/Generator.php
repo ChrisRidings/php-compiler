@@ -158,6 +158,7 @@ class Generator
         $ir[] = "; Type checking functions";
         $ir[] = "declare i32 @php_is_int(%struct.zval*)";
         $ir[] = "declare i32 @php_isset(%struct.zval*)";
+        $ir[] = "declare void @php_unset(%struct.zval*)";
         $ir[] = "";
 
         // First pass: collect class definitions for method lookup
@@ -575,7 +576,12 @@ class Generator
             $ir[] = "  br label %{$loopHeader}";
         } elseif ($statement instanceof ExpressionStatement) {
             // Expression statement - evaluate the expression and discard the result
-            $this->generateExpression($statement->expression, $ir, $globalVars);
+            // Special handling for unset() which is a statement-level construct
+            if ($statement->expression instanceof FunctionCall && $statement->expression->name === 'unset') {
+                $this->generateUnsetFunctionCall($statement->expression, $ir, $globalVars);
+            } else {
+                $this->generateExpression($statement->expression, $ir, $globalVars);
+            }
         } elseif ($statement instanceof ClassDefinition) {
             // Store class definition for method lookup
             $this->classDefinitions[$statement->name] = $statement;
@@ -1041,6 +1047,9 @@ class Generator
         } elseif ($funcCall->name === 'isset') {
             $this->generateIssetFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'unset') {
+            $this->generateUnsetFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -1427,6 +1436,27 @@ class Generator
         $resultPtr = $this->getNextTempVariable();
         $ir[] = "  {$resultPtr} = alloca %struct.zval";
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$issetResult})";
+        $ir[] = "";
+    }
+
+    private function generateUnsetFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("unset() expects exactly 1 argument");
+        }
+
+        // Get the argument - it should be a variable reference
+        $arg = $funcCall->arguments[0];
+        if ($arg instanceof VariableReference) {
+            // For variables, we can directly unset them
+            $varName = $arg->name;
+            // Call php_unset to destroy the value and set it to null
+            $ir[] = "  call void @php_unset(%struct.zval* %{$varName})";
+        } else {
+            // For other expressions, evaluate and then unset the result
+            $argPtr = $this->generateExpression($arg, $ir, $globalVars);
+            $ir[] = "  call void @php_unset(%struct.zval* {$argPtr})";
+        }
         $ir[] = "";
     }
 

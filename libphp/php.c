@@ -1426,3 +1426,15 @@ int php_isset(zval* z) {
     if (z == NULL) return 0;
     return (z->type != PHP_TYPE_NULL) ? 1 : 0;
 }
+
+// unset implementation - destroys a zval and sets it to null
+// This mimics PHP's unset() behavior
+void php_unset(zval* z) {
+    if (z == NULL) return;
+
+    // Destroy the current value
+    php_zval_destroy(z);
+
+    // Set the zval to null
+    php_zval_null(z);
+}

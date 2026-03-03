@@ -402,6 +402,14 @@ int php_is_int(zval* z);
  */
 int php_isset(zval* z);
 
+/**
+ * Unsets a zval, destroying its current value and setting it to null.
+ * This mimics PHP's unset() behavior for single variables.
+ *
+ * @param z The zval to unset
+ */
+void php_unset(zval* z);
+
 #ifdef __cplusplus
 }
 #endif

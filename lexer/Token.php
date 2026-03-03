@@ -73,6 +73,7 @@ enum TokenType: int
     case T_ARRAY = 65;           // array keyword
     case T_QUESTION = 66;        // ? (ternary operator)
     case T_ISSET = 67;           // isset keyword
+    case T_UNSET = 68;           // unset keyword
 }
 
 class Token
