@@ -29,6 +29,7 @@ struct php_object;
 // Zval struct representing a dynamically typed value
 typedef struct {
     php_type_t type;
+    int refcount;             // reference count for garbage collection
     union {
         int bool_val;           // for PHP_TYPE_BOOL
         int int_val;            // for PHP_TYPE_INT
@@ -78,6 +79,23 @@ void php_zval_string(zval* z, const char* str);
  * Use this for string literals from the compiler (\n -> newline, \" -> ", etc.)
  */
 void php_zval_string_literal(zval* z, const char* str);
+
+/**
+ * Increments the reference count of a zval.
+ * Call this when assigning a zval to a new variable.
+ *
+ * @param z The zval to increment
+ */
+void php_zval_copy(zval* z);
+
+/**
+ * Decrements the reference count of a zval.
+ * If refcount reaches 0, frees the zval's resources.
+ * Call this when a variable goes out of scope.
+ *
+ * @param z The zval to decrement
+ */
+void php_zval_destroy(zval* z);
 
 /**
  * Converts a zval to string.

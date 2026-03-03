@@ -68,23 +68,25 @@ static char* process_escape_sequences(const char* input) {
 // Zval creation functions
 void php_zval_null(zval* z) {
     z->type = PHP_TYPE_NULL;
+    z->refcount = 1;
 }
 
 void php_zval_bool(zval* z, int bool_val) {
     z->type = PHP_TYPE_BOOL;
+    z->refcount = 1;
     z->value.bool_val = bool_val ? 1 : 0;
 }
 
 void php_zval_int(zval* z, int int_val) {
     z->type = PHP_TYPE_INT;
+    z->refcount = 1;
     z->value.int_val = int_val;
 }
 
 void php_zval_string(zval* z, const char* str) {
     z->type = PHP_TYPE_STRING;
+    z->refcount = 1;
     // Duplicate the string to ensure we own the memory
-    // Note: This creates a memory leak since we never free these strings,
-    // but it's necessary to avoid dangling pointers from temporary buffers
     if (str) {
         z->value.str_val = strdup(str);
     } else {
@@ -95,12 +97,68 @@ void php_zval_string(zval* z, const char* str) {
 // Store a PHP string literal with escape sequence processing
 void php_zval_string_literal(zval* z, const char* str) {
     z->type = PHP_TYPE_STRING;
+    z->refcount = 1;
     // Process escape sequences (\n -> newline, \" -> ", etc.)
     // This is used for PHP string literals from the compiler
     if (str) {
         z->value.str_val = process_escape_sequences(str);
     } else {
         z->value.str_val = NULL;
+    }
+}
+
+// Reference counting functions
+void php_zval_copy(zval* z) {
+    if (z == NULL) return;
+    z->refcount++;
+}
+
+// Forward declarations for destroy helpers (defined after array struct)
+struct php_array;
+struct php_object;
+static void php_array_destroy(struct php_array* arr);
+static void php_object_destroy(struct php_object* obj);
+
+void php_zval_destroy(zval* z) {
+    if (z == NULL) return;
+
+    z->refcount--;
+    if (z->refcount > 0) {
+        return;  // Still referenced elsewhere
+    }
+
+    // Refcount reached 0, free resources
+    switch (z->type) {
+        case PHP_TYPE_STRING:
+            if (z->value.str_val != NULL) {
+                free(z->value.str_val);
+                z->value.str_val = NULL;
+            }
+            break;
+
+        case PHP_TYPE_ARRAY: {
+            struct php_array* arr = (struct php_array*)((long long)z->value.ptr_val);
+            if (arr != NULL) {
+                php_array_destroy(arr);
+                z->value.ptr_val = 0;
+            }
+            break;
+        }
+
+        case PHP_TYPE_OBJECT: {
+            struct php_object* obj = z->value.obj_val;
+            if (obj != NULL) {
+                php_object_destroy(obj);
+                z->value.obj_val = NULL;
+            }
+            break;
+        }
+
+        case PHP_TYPE_NULL:
+        case PHP_TYPE_BOOL:
+        case PHP_TYPE_INT:
+            // These types don't allocate heap memory
+            break;
     }
 }
 
@@ -210,8 +268,45 @@ typedef struct php_array {
     int capacity;
 } php_array;
 
+// Forward declarations for destroy helpers
+static void php_array_destroy(php_array* arr);
+static void php_object_destroy(php_object* obj);
+
+// Destroy an array and all its elements
+static void php_array_destroy(php_array* arr) {
+    if (arr == NULL) return;
+
+    // Destroy all elements
+    for (int i = 0; i < arr->size; i++) {
+        if (arr->elements[i].key != NULL) {
+            free(arr->elements[i].key);
+        }
+        php_zval_destroy(&arr->elements[i].value);
+    }
+
+    free(arr->elements);
+    free(arr);
+}
+
+// Destroy an object and all its properties
+static void php_object_destroy(php_object* obj) {
+    if (obj == NULL) return;
+
+    // Destroy all properties
+    for (int i = 0; i < obj->property_count; i++) {
+        free(obj->properties[i].name);
+        php_zval_destroy(&obj->properties[i].value);
+    }
+
+    free(obj->properties);
+    free(obj->class_name);
+    free(obj);
+}
+
 void php_array_create(zval* z, int initial_capacity) {
     z->type = PHP_TYPE_ARRAY;
+    z->refcount = 1;
+
     php_array* arr = (php_array*)malloc(sizeof(php_array));
     if (!arr) return;
 
@@ -1247,6 +1342,7 @@ void php_shell_exec(zval* cmd, zval* result) {
 
 void php_object_create(zval* z, const char* class_name) {
     z->type = PHP_TYPE_OBJECT;
+    z->refcount = 1;
 
     php_object* obj = (php_object*)malloc(sizeof(php_object));
     if (!obj) return;
