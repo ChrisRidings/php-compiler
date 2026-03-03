@@ -1411,3 +1411,9 @@ void php_object_property_set(zval* obj_zval, const char* property_name, zval* va
     obj->properties[obj->property_count].value = *value;
     obj->property_count++;
 }
+
+// is_int implementation - checks if a zval is an integer
+int php_is_int(zval* z) {
+    if (z == NULL) return 0;
+    return (z->type == PHP_TYPE_INT) ? 1 : 0;
+}

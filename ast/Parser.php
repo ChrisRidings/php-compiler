@@ -35,6 +35,7 @@ use PhpCompiler\AST\NewExpression;
 use PhpCompiler\AST\PropertyAccess;
 use PhpCompiler\AST\MethodDefinition;
 use PhpCompiler\AST\MethodCall;
+use PhpCompiler\AST\CastExpression;
 
 class Parser
 {
@@ -1081,6 +1082,24 @@ class Parser
             // Array literal [elem1, elem2, ...]
             return $this->parseArrayLiteral();
         } elseif ($token->type === TokenType::T_LPAREN) {
+            // Check if this is a type cast like (int), (string), (bool), (float)
+            $nextToken = $this->peekToken();
+            if ($nextToken && $nextToken->type === TokenType::T_IDENTIFIER) {
+                $castType = strtolower($nextToken->value);
+                if (in_array($castType, ['int', 'integer', 'string', 'bool', 'boolean', 'float', 'double', 'array', 'object'])) {
+                    // Check if it's followed by )
+                    $afterType = $this->peekToken(2);
+                    if ($afterType && $afterType->type === TokenType::T_RPAREN) {
+                        // This is a cast expression
+                        $this->consumeToken(); // Consume (
+                        $typeToken = $this->consumeToken(); // Consume type
+                        $this->consumeToken(); // Consume )
+                        $expression = $this->parsePrimary(); // Parse the operand
+                        return new CastExpression($castType, $expression, $token->line, $token->column);
+                    }
+                }
+            }
+
             // Parenthesized expression (expr)
             $this->consumeToken(); // Consume (
             $expression = $this->parseExpression();

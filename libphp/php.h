@@ -385,6 +385,14 @@ void php_object_property_get(zval* result, zval* obj, const char* property_name)
  */
 void php_object_property_set(zval* obj, const char* property_name, zval* value);
 
+/**
+ * Checks if a zval is an integer.
+ *
+ * @param z The zval to check
+ * @return 1 if the zval is an integer, 0 otherwise
+ */
+int php_is_int(zval* z);
+
 #ifdef __cplusplus
 }
 #endif

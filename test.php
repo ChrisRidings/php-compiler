@@ -1,17 +1,11 @@
 <?php
-class Counter {
-    public int $value = 0;
+    $var="10";
+    $number=(int)$var;
 
-    public function increment() {
-        $this->value = $this->value + 1;
+    if (is_int($number)){
+        echo "The variable is an integer";
     }
-
-    public function getValue(): int {
-        return $this->value;
+    else{
+        echo "The variable is not an integer";
     }
-}
-
-$counter = new Counter();
-$counter->increment();
-$counter->increment();
-echo $counter->getValue() . "\n";
+?>

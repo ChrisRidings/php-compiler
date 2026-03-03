@@ -38,6 +38,7 @@ use PhpCompiler\AST\NewExpression;
 use PhpCompiler\AST\PropertyAccess;
 use PhpCompiler\AST\MethodDefinition;
 use PhpCompiler\AST\MethodCall;
+use PhpCompiler\AST\CastExpression;
 
 class Generator
 {
@@ -153,6 +154,8 @@ class Generator
         $ir[] = "; Reference counting functions";
         $ir[] = "declare void @php_zval_copy(%struct.zval*)";
         $ir[] = "declare void @php_zval_destroy(%struct.zval*)";
+        $ir[] = "; Type checking functions";
+        $ir[] = "declare i32 @php_is_int(%struct.zval*)";
         $ir[] = "";
 
         // First pass: collect class definitions for method lookup
@@ -1017,6 +1020,9 @@ class Generator
         } elseif ($funcCall->name === 'exit') {
             $this->generateExitFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'is_int') {
+            $this->generateIsIntFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -1366,6 +1372,26 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateIsIntFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("is_int() expects exactly 1 argument");
+        }
+
+        // Generate the argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_is_int to check if it's an integer
+        $isIntResult = $this->getNextTempVariable();
+        $ir[] = "  {$isIntResult} = call i32 @php_is_int(%struct.zval* {$argPtr})";
+
+        // Store result in a zval (we need to allocate and store, but since this is a statement, we just discard)
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$isIntResult})";
+        $ir[] = "";
+    }
+
     private function generateArrayValuesExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -1637,6 +1663,27 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateIsIntExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("is_int() expects exactly 1 argument");
+        }
+
+        // Generate the argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_is_int to check if it's an integer
+        $isIntResult = $this->getNextTempVariable();
+        $ir[] = "  {$isIntResult} = call i32 @php_is_int(%struct.zval* {$argPtr})";
+
+        // Store result in a zval and return pointer
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$isIntResult})";
+
+        return $resultPtr;
+    }
+
     private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void
     {
         foreach ($statement->expressions as $expression) {
@@ -1698,6 +1745,8 @@ class Generator
                 return $this->generateUnlinkExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'str_replace') {
                 return $this->generateStrReplaceExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'is_int') {
+                return $this->generateIsIntExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval
@@ -1730,6 +1779,8 @@ class Generator
             return $this->generatePropertyAccess($expression, $ir, $globalVars);
         } elseif ($expression instanceof MethodCall) {
             return $this->generateMethodCall($expression, $ir, $globalVars);
+        } elseif ($expression instanceof CastExpression) {
+            return $this->generateCastExpression($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -1740,6 +1791,56 @@ class Generator
                 )
             );
         }
+    }
+
+    private function generateCastExpression(CastExpression $cast, array &$ir, array $globalVars): string
+    {
+        // Generate the expression to cast
+        $exprPtr = $this->generateExpression($cast->expression, $ir, $globalVars);
+
+        // Allocate result zval
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+
+        // Handle different cast types
+        $castType = strtolower($cast->type);
+        switch ($castType) {
+            case 'int':
+            case 'integer':
+                // Convert to integer using php_zval_to_int and then back to zval
+                $intVal = $this->getNextTempVariable();
+                $ir[] = "  {$intVal} = call i32 @php_zval_to_int(%struct.zval* {$exprPtr})";
+                $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 {$intVal})";
+                break;
+
+            case 'string':
+                // Convert to string
+                $strVal = $this->getNextTempVariable();
+                $ir[] = "  {$strVal} = call i8* @php_zval_to_string(%struct.zval* {$exprPtr})";
+                $ir[] = "  call void @php_zval_string(%struct.zval* {$result}, i8* {$strVal})";
+                break;
+
+            case 'bool':
+            case 'boolean':
+                // Convert to boolean: check if value is truthy
+                $intVal = $this->getNextTempVariable();
+                $ir[] = "  {$intVal} = call i32 @php_zval_to_int(%struct.zval* {$exprPtr})";
+                $isTrue = $this->getNextTempVariable();
+                $ir[] = "  {$isTrue} = icmp ne i32 {$intVal}, 0";
+                $boolVal = $this->getNextTempVariable();
+                $ir[] = "  {$boolVal} = zext i1 {$isTrue} to i32";
+                $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 {$boolVal})";
+                break;
+
+            default:
+                // For unsupported cast types, just copy the value as-is
+                $loadedVal = $this->getNextTempVariable();
+                $ir[] = "  {$loadedVal} = load %struct.zval, %struct.zval* {$exprPtr}";
+                $ir[] = "  store %struct.zval {$loadedVal}, %struct.zval* {$result}";
+                break;
+        }
+
+        return $result;
     }
 
     private function generateIntegerLiteral(IntegerLiteral $literal, array &$ir, array $globalVars): string
