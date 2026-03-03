@@ -179,6 +179,16 @@ class Parser
         $parameters = $this->parseParameters();
 
         $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        // Parse optional return type declaration (e.g., ": int")
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_COLON) {
+            $this->consumeToken(); // Consume :
+            // Skip the return type identifier (e.g., int, string, bool, void)
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_IDENTIFIER) {
+                $this->consumeToken(); // Consume return type
+            }
+        }
+
         $this->consumeTokenOfType(TokenType::T_LBRACE);
 
         $body = $this->parseFunctionBody();
@@ -268,6 +278,16 @@ class Parser
         $parameters = $this->parseParameters();
 
         $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        // Parse optional return type declaration (e.g., ": int")
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_COLON) {
+            $this->consumeToken(); // Consume :
+            // Skip the return type identifier (e.g., int, string, bool, void)
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_IDENTIFIER) {
+                $this->consumeToken(); // Consume return type
+            }
+        }
+
         $this->consumeTokenOfType(TokenType::T_LBRACE);
 
         $body = $this->parseFunctionBody();
@@ -304,9 +324,17 @@ class Parser
             $token = $this->currentToken();
         }
 
+        // Skip optional type hint (e.g., int, string, bool)
+        if ($token && $token->type === TokenType::T_IDENTIFIER) {
+            $this->consumeToken(); // Skip type hint
+            $token = $this->currentToken();
+        }
+
         // Parse variable name
         if (!$token || $token->type !== TokenType::T_VARIABLE) {
-            throw new \RuntimeException("Expected property name at line {$token->line}, column {$token->column}");
+            $line = $token ? $token->line : 'unknown';
+            $column = $token ? $token->column : 'unknown';
+            throw new \RuntimeException("Expected property name at line {$line}, column {$column}");
         }
         $varToken = $this->consumeToken();
         $propertyName = ltrim($varToken->value, '$');

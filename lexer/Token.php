@@ -69,6 +69,7 @@ enum TokenType: int
     case T_NEW = 61;             // new
     case T_OBJECT_OPERATOR = 62; // ->
     case T_VAR = 63;             // var (for compatibility)
+    case T_COLON = 64;           // : (return type separator)
 }
 
 class Token

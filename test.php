@@ -1,14 +1,17 @@
 <?php
+class Counter {
+    public int $value = 0;
 
-class A {
-    public $x;
+    public function increment() {
+        $this->value = $this->value + 1;
+    }
 
-    public function get_x_plus(int $b) {
-        echo $this->x + $b . "\n";
+    public function getValue(): int {
+        return $this->value;
     }
 }
 
-$a = new A();
-
-$a->x = 1;
-echo $a->get_x_plus(2) . "\n";
+$counter = new Counter();
+$counter->increment();
+$counter->increment();
+echo $counter->getValue() . "\n";
