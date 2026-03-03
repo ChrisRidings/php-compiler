@@ -8,3 +8,5 @@ test.exe
 runtests.exe
 libphp/libphp.a
 libphp/php.o
+out.dat
+output.bc
