@@ -1081,6 +1081,9 @@ class Parser
         } elseif ($token->type === TokenType::T_LBRACKET) {
             // Array literal [elem1, elem2, ...]
             return $this->parseArrayLiteral();
+        } elseif ($token->type === TokenType::T_ARRAY) {
+            // Array literal array(elem1, elem2, ...) or array(key => value, ...)
+            return $this->parseArrayLiteralOldSyntax();
         } elseif ($token->type === TokenType::T_LPAREN) {
             // Check if this is a type cast like (int), (string), (bool), (float)
             $nextToken = $this->peekToken();
@@ -1158,6 +1161,53 @@ class Parser
         }
 
         $this->consumeTokenOfType(TokenType::T_RBRACKET);
+
+        return new ArrayLiteral($elements, $keys, $token->line, $token->column);
+    }
+
+    private function parseArrayLiteralOldSyntax(): ArrayLiteral
+    {
+        $token = $this->consumeToken(); // Consume 'array'
+        $this->consumeTokenOfType(TokenType::T_LPAREN); // Consume (
+
+        $elements = [];
+        $keys = [];
+
+        // Parse elements until we hit )
+        if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
+            // Parse first element (could be key => value or just value)
+            $firstExpr = $this->parseExpression();
+
+            // Check if this is a key => value pair
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_DOUBLE_ARROW) {
+                $this->consumeToken(); // Consume =>
+                $keys[] = $firstExpr;
+                $elements[] = $this->parseExpression();
+            } else {
+                $keys[] = null;
+                $elements[] = $firstExpr;
+            }
+
+            // Parse additional elements separated by commas
+            while ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
+                $this->consumeToken(); // Consume comma
+                if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_RPAREN) {
+                    $expr = $this->parseExpression();
+
+                    // Check if this is a key => value pair
+                    if ($this->currentToken() && $this->currentToken()->type === TokenType::T_DOUBLE_ARROW) {
+                        $this->consumeToken(); // Consume =>
+                        $keys[] = $expr;
+                        $elements[] = $this->parseExpression();
+                    } else {
+                        $keys[] = null;
+                        $elements[] = $expr;
+                    }
+                }
+            }
+        }
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
 
         return new ArrayLiteral($elements, $keys, $token->line, $token->column);
     }

@@ -37,6 +37,7 @@ class Lexer
         TokenType::T_PROTECTED->value => '/^protected\b/i',
         TokenType::T_NEW->value => '/^new\b/i',
         TokenType::T_VAR->value => '/^var\b/i',
+        TokenType::T_ARRAY->value => '/^array\b/i',
         // String literals - simple pattern that matches anything between quotes
         // Double-quoted strings can have escaped quotes, single-quoted treat \' as escape
         TokenType::T_STRING->value => '/^(?:"[^"]*"|\'[^\']*\')/',

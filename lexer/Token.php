@@ -70,6 +70,7 @@ enum TokenType: int
     case T_OBJECT_OPERATOR = 62; // ->
     case T_VAR = 63;             // var (for compatibility)
     case T_COLON = 64;           // : (return type separator)
+    case T_ARRAY = 65;           // array keyword
 }
 
 class Token
