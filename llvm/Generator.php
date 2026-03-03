@@ -69,6 +69,12 @@ class Generator
      */
     private array $classDefinitions = [];
 
+    /**
+     * Track local variables in current function scope for cleanup
+     * @var array<string, bool>
+     */
+    private array $functionLocalVars = [];
+
     public function __construct(array $statements)
     {
         $this->statements = $statements;
@@ -144,6 +150,9 @@ class Generator
         $ir[] = "declare void @php_object_property_get(%struct.zval*, %struct.zval*, i8*)";
         $ir[] = "declare void @php_object_property_set(%struct.zval*, i8*, %struct.zval*)";
         $ir[] = "declare void @exit(i32) noreturn";
+        $ir[] = "; Reference counting functions";
+        $ir[] = "declare void @php_zval_copy(%struct.zval*)";
+        $ir[] = "declare void @php_zval_destroy(%struct.zval*)";
         $ir[] = "";
 
         // First pass: collect class definitions for method lookup
@@ -572,6 +581,17 @@ class Generator
         }
     }
 
+    /**
+     * Generate cleanup code to destroy all local variables in the current function scope.
+     * This should be called before returning from a function.
+     */
+    private function generateLocalVarCleanup(array &$ir): void
+    {
+        foreach ($this->functionLocalVars as $varName => $_) {
+            $ir[] = "  call void @php_zval_destroy(%struct.zval* %{$varName})";
+        }
+    }
+
     private function generateReturnStatement(ReturnStatement $returnStmt, array &$ir, array $globalVars, bool $inFunction = false): void
     {
         // If this ReturnStatement is being used as an expression statement wrapper
@@ -582,6 +602,11 @@ class Generator
             // Just evaluate the expression, don't return
             $this->generateExpression($returnStmt->value, $ir, $globalVars);
             return;
+        }
+
+        // Clean up local variables before returning (only in function scope)
+        if ($inFunction) {
+            $this->generateLocalVarCleanup($ir);
         }
 
         // Always return a zval
@@ -627,7 +652,16 @@ class Generator
 
         if ($assignment->operator === '=') {
             // Simple assignment
+            // First, destroy the old value if this variable already existed
+            if (isset($this->declaredVars[$varName])) {
+                $ir[] = "  call void @php_zval_destroy(%struct.zval* %{$varName})";
+            }
+
             $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+
+            // Increment refcount on the new value
+            $ir[] = "  call void @php_zval_copy(%struct.zval* {$valuePtr})";
+
             $value = $this->getNextTempVariable();
             $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
             $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
@@ -689,6 +723,14 @@ class Generator
 
         if ($assignment->operator === '=') {
             // Simple assignment
+            // First, destroy the old value if this variable already existed
+            if (isset($this->declaredVars[$varName])) {
+                $ir[] = "  call void @php_zval_destroy(%struct.zval* %{$varName})";
+            }
+
+            // Increment refcount on the new value
+            $ir[] = "  call void @php_zval_copy(%struct.zval* {$valuePtr})";
+
             $value = $this->getNextTempVariable();
             $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
             $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
@@ -763,7 +805,9 @@ class Generator
     {
         // Save and reset declaredVars for function scope
         $savedDeclaredVars = $this->declaredVars;
+        $savedFunctionLocalVars = $this->functionLocalVars;
         $this->declaredVars = [];
+        $this->functionLocalVars = [];
 
         // All functions return zval and parameters are zval
         $paramTypes = implode(', ', array_fill(0, count($funcDef->parameters), '%struct.zval'));
@@ -771,11 +815,24 @@ class Generator
         $ir[] = "entry:";
 
         // Add parameters to declared vars (they're allocated separately)
+        // Parameters are NOT in functionLocalVars - they are caller's responsibility
         foreach ($funcDef->parameters as $param) {
             $this->declaredVars[$param->name] = true;
         }
 
         // Pre-declare all local variables in the entry block
+        // Track which variables are local (not parameters)
+        $localVarNames = [];
+        $this->collectVariablesFromStatements($funcDef->body, $localVarNames);
+
+        // Filter out parameter names from local vars
+        $paramNames = array_map(fn($p) => $p->name, $funcDef->parameters);
+        foreach ($localVarNames as $varName => $_) {
+            if (!in_array($varName, $paramNames)) {
+                $this->functionLocalVars[$varName] = true;
+            }
+        }
+
         $this->collectAndDeclareVariables($funcDef->body, $ir);
 
         // Allocate stack space for parameters
@@ -797,6 +854,9 @@ class Generator
         }
 
         if (!$hasReturn) {
+            // Clean up local variables before implicit return
+            $this->generateLocalVarCleanup($ir);
+
             $nullResult = $this->getNextTempVariable();
             $ir[] = "  {$nullResult} = alloca %struct.zval";
             $ir[] = "  call void @php_zval_null(%struct.zval* {$nullResult})";
@@ -808,15 +868,18 @@ class Generator
         $ir[] = "}";
         $ir[] = "";
 
-        // Restore declaredVars for main scope
+        // Restore declaredVars and functionLocalVars for parent scope
         $this->declaredVars = $savedDeclaredVars;
+        $this->functionLocalVars = $savedFunctionLocalVars;
     }
 
     private function generateMethodFunction(string $className, MethodDefinition $method, array &$ir, array $globalVars): void
     {
         // Save and reset declaredVars for method scope
         $savedDeclaredVars = $this->declaredVars;
+        $savedFunctionLocalVars = $this->functionLocalVars;
         $this->declaredVars = [];
+        $this->functionLocalVars = [];
 
         // Method name is prefixed with class name: ClassName_methodName
         $methodFuncName = $className . '_' . $method->name;
@@ -832,11 +895,28 @@ class Generator
         $ir[] = "define %struct.zval @{$methodFuncName}({$paramTypesStr}) {";
         $ir[] = "entry:";
 
-        // Pre-declare all local variables in the entry block
-        $this->collectAndDeclareVariables($method->body, $ir);
-
-        // Add $this to declared vars (it's the first parameter, a pointer)
+        // Add parameters and $this to declared vars (they're allocated separately)
+        // Parameters are NOT in functionLocalVars - they are caller's responsibility
         $this->declaredVars['this'] = true;
+        foreach ($method->parameters as $param) {
+            $this->declaredVars[$param->name] = true;
+        }
+
+        // Pre-declare all local variables in the entry block
+        // Track which variables are local (not parameters or $this)
+        $localVarNames = [];
+        $this->collectVariablesFromStatements($method->body, $localVarNames);
+
+        // Filter out parameter names and 'this' from local vars
+        $paramNames = array_map(fn($p) => $p->name, $method->parameters);
+        $paramNames[] = 'this';
+        foreach ($localVarNames as $varName => $_) {
+            if (!in_array($varName, $paramNames)) {
+                $this->functionLocalVars[$varName] = true;
+            }
+        }
+
+        $this->collectAndDeclareVariables($method->body, $ir);
 
         // Allocate stack space for $this parameter
         $ir[] = "  %this = alloca %struct.zval*";
@@ -846,7 +926,6 @@ class Generator
         foreach ($method->parameters as $i => $param) {
             $ir[] = "  %{$param->name} = alloca %struct.zval";
             $ir[] = "  store %struct.zval %" . ($i + 1) . ", %struct.zval* %{$param->name}";
-            $this->declaredVars[$param->name] = true;
         }
 
         // Generate method body statements
@@ -865,6 +944,9 @@ class Generator
 
         // If no return statement, return null
         if (!$hasReturn) {
+            // Clean up local variables before implicit return
+            $this->generateLocalVarCleanup($ir);
+
             $nullResult = $this->getNextTempVariable();
             $ir[] = "  {$nullResult} = alloca %struct.zval";
             $ir[] = "  call void @php_zval_null(%struct.zval* {$nullResult})";
@@ -876,8 +958,9 @@ class Generator
         $ir[] = "}";
         $ir[] = "";
 
-        // Restore declaredVars for parent scope
+        // Restore declaredVars and functionLocalVars for parent scope
         $this->declaredVars = $savedDeclaredVars;
+        $this->functionLocalVars = $savedFunctionLocalVars;
     }
 
     private function generateFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
@@ -1875,7 +1958,16 @@ class Generator
                     $this->generatePropertyAssignment($init, $ir, $globalVars);
                 } else {
                     $varName = $init->variable->name;
+
+                    // Destroy old value if variable already exists
+                    if (isset($this->declaredVars[$varName])) {
+                        $ir[] = "  call void @php_zval_destroy(%struct.zval* %{$varName})";
+                    }
+
                     $valuePtr = $this->generateExpression($init->value, $ir, $globalVars);
+
+                    // Increment refcount on the new value
+                    $ir[] = "  call void @php_zval_copy(%struct.zval* {$valuePtr})";
 
                     $value = $this->getNextTempVariable();
                     $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
