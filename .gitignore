@@ -5,4 +5,6 @@ stdlib.obj
 output.ll
 php.obj
 test.exe
+runtests.exe
 libphp/libphp.a
+libphp/php.o
