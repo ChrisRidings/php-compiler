@@ -71,6 +71,8 @@ enum TokenType: int
     case T_VAR = 63;             // var (for compatibility)
     case T_COLON = 64;           // : (return type separator)
     case T_ARRAY = 65;           // array keyword
+    case T_QUESTION = 66;        // ? (ternary operator)
+    case T_ISSET = 67;           // isset keyword
 }
 
 class Token

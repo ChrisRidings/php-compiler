@@ -393,6 +393,15 @@ void php_object_property_set(zval* obj, const char* property_name, zval* value);
  */
 int php_is_int(zval* z);
 
+/**
+ * Checks if a zval is set (not null).
+ * In PHP, isset() returns false if the variable is null, true otherwise.
+ *
+ * @param z The zval to check
+ * @return 1 if the zval is not null, 0 if it is null
+ */
+int php_isset(zval* z);
+
 #ifdef __cplusplus
 }
 #endif

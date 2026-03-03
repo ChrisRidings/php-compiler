@@ -38,6 +38,7 @@ class Lexer
         TokenType::T_NEW->value => '/^new\b/i',
         TokenType::T_VAR->value => '/^var\b/i',
         TokenType::T_ARRAY->value => '/^array\b/i',
+        TokenType::T_ISSET->value => '/^isset\b/i',
         // String literals - simple pattern that matches anything between quotes
         // Double-quoted strings can have escaped quotes, single-quoted treat \' as escape
         TokenType::T_STRING->value => '/^(?:"[^"]*"|\'[^\']*\')/',
@@ -76,6 +77,7 @@ class Lexer
         TokenType::T_DIVIDE->value => '/^\//',
         TokenType::T_SEMICOLON->value => '/^;/',
         TokenType::T_COLON->value => '/^:/',
+        TokenType::T_QUESTION->value => '/^\?/',
         TokenType::T_WHITESPACE->value => '/^\s+/',
     ];
 

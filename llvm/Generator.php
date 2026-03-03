@@ -39,6 +39,7 @@ use PhpCompiler\AST\PropertyAccess;
 use PhpCompiler\AST\MethodDefinition;
 use PhpCompiler\AST\MethodCall;
 use PhpCompiler\AST\CastExpression;
+use PhpCompiler\AST\TernaryExpression;
 
 class Generator
 {
@@ -156,6 +157,7 @@ class Generator
         $ir[] = "declare void @php_zval_destroy(%struct.zval*)";
         $ir[] = "; Type checking functions";
         $ir[] = "declare i32 @php_is_int(%struct.zval*)";
+        $ir[] = "declare i32 @php_isset(%struct.zval*)";
         $ir[] = "";
 
         // First pass: collect class definitions for method lookup
@@ -375,6 +377,13 @@ class Generator
             foreach ($node->arguments as $arg) {
                 $this->collectGlobals($arg, $globalVars);
             }
+        } elseif ($node instanceof TernaryExpression) {
+            // Collect from condition, ifTrue (if present), and ifFalse expressions
+            $this->collectGlobals($node->condition, $globalVars);
+            if ($node->ifTrue !== null) {
+                $this->collectGlobals($node->ifTrue, $globalVars);
+            }
+            $this->collectGlobals($node->ifFalse, $globalVars);
         } elseif ($node instanceof StringLiteral) {
             $globalName = "__str_const_" . md5($node->value);
             if (!isset($globalVars[$globalName])) {
@@ -519,6 +528,12 @@ class Generator
             }
         } elseif ($node instanceof ExpressionStatement) {
             $this->collectVariablesFromNode($node->expression, $varNames);
+        } elseif ($node instanceof TernaryExpression) {
+            $this->collectVariablesFromNode($node->condition, $varNames);
+            if ($node->ifTrue !== null) {
+                $this->collectVariablesFromNode($node->ifTrue, $varNames);
+            }
+            $this->collectVariablesFromNode($node->ifFalse, $varNames);
         }
         // StringLiteral, IntegerLiteral, BooleanLiteral, NullLiteral, Constant, VariableReference
         // don't need special handling as they don't introduce new variables
@@ -1023,6 +1038,9 @@ class Generator
         } elseif ($funcCall->name === 'is_int') {
             $this->generateIsIntFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'isset') {
+            $this->generateIssetFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -1392,6 +1410,26 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateIssetFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("isset() expects exactly 1 argument");
+        }
+
+        // Generate the argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_isset to check if it's set (not null)
+        $issetResult = $this->getNextTempVariable();
+        $ir[] = "  {$issetResult} = call i32 @php_isset(%struct.zval* {$argPtr})";
+
+        // Store result in a zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$issetResult})";
+        $ir[] = "";
+    }
+
     private function generateArrayValuesExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -1684,6 +1722,27 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateIssetExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("isset() expects exactly 1 argument");
+        }
+
+        // Generate the argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_isset to check if it's set (not null)
+        $issetResult = $this->getNextTempVariable();
+        $ir[] = "  {$issetResult} = call i32 @php_isset(%struct.zval* {$argPtr})";
+
+        // Store result in a zval and return pointer
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$issetResult})";
+
+        return $resultPtr;
+    }
+
     private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void
     {
         foreach ($statement->expressions as $expression) {
@@ -1747,6 +1806,8 @@ class Generator
                 return $this->generateStrReplaceExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'is_int') {
                 return $this->generateIsIntExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'isset') {
+                return $this->generateIssetExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval
@@ -1781,6 +1842,8 @@ class Generator
             return $this->generateMethodCall($expression, $ir, $globalVars);
         } elseif ($expression instanceof CastExpression) {
             return $this->generateCastExpression($expression, $ir, $globalVars);
+        } elseif ($expression instanceof TernaryExpression) {
+            return $this->generateTernaryExpression($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -1839,6 +1902,63 @@ class Generator
                 $ir[] = "  store %struct.zval {$loadedVal}, %struct.zval* {$result}";
                 break;
         }
+
+        return $result;
+    }
+
+    private function generateTernaryExpression(TernaryExpression $ternary, array &$ir, array $globalVars): string
+    {
+        // Generate the condition
+        $conditionPtr = $this->generateExpression($ternary->condition, $ir, $globalVars);
+
+        // Convert condition to integer for boolean check
+        $condInt = $this->getNextTempVariable();
+        $ir[] = "  {$condInt} = call i32 @php_zval_to_int(%struct.zval* {$conditionPtr})";
+
+        // Check if condition is true
+        $isTrue = $this->getNextTempVariable();
+        $ir[] = "  {$isTrue} = icmp ne i32 {$condInt}, 0";
+
+        // Create basic blocks
+        static $blockCounter = 0;
+        $thenBlock = "ternary_then_" . ++$blockCounter;
+        $elseBlock = "ternary_else_" . $blockCounter;
+        $mergeBlock = "ternary_merge_" . $blockCounter;
+
+        // Branch to then or else block
+        $ir[] = "  br i1 {$isTrue}, label %{$thenBlock}, label %{$elseBlock}";
+
+        // Allocate result zval (outside the branches to be available in both)
+        $result = $this->getNextTempVariable();
+
+        // Then block - evaluate ifTrue expression (or condition for Elvis operator)
+        $ir[] = "{$thenBlock}:";
+        if ($ternary->ifTrue !== null) {
+            // Regular ternary: condition ? ifTrue : ifFalse
+            $trueValuePtr = $this->generateExpression($ternary->ifTrue, $ir, $globalVars);
+        } else {
+            // Elvis operator: condition ?: ifFalse (returns condition if truthy)
+            $trueValuePtr = $conditionPtr;
+        }
+        $trueValue = $this->getNextTempVariable();
+        $ir[] = "  {$trueValue} = load %struct.zval, %struct.zval* {$trueValuePtr}";
+        $ir[] = "  br label %{$mergeBlock}";
+
+        // Else block - evaluate ifFalse expression
+        $ir[] = "{$elseBlock}:";
+        $falseValuePtr = $this->generateExpression($ternary->ifFalse, $ir, $globalVars);
+        $falseValue = $this->getNextTempVariable();
+        $ir[] = "  {$falseValue} = load %struct.zval, %struct.zval* {$falseValuePtr}";
+        $ir[] = "  br label %{$mergeBlock}";
+
+        // Merge block - phi to select the appropriate value
+        $ir[] = "{$mergeBlock}:";
+        $phiResult = $this->getNextTempVariable();
+        $ir[] = "  {$phiResult} = phi %struct.zval [ {$trueValue}, %{$thenBlock} ], [ {$falseValue}, %{$elseBlock} ]";
+
+        // Allocate and store the result
+        $ir[] = "  {$result} = alloca %struct.zval";
+        $ir[] = "  store %struct.zval {$phiResult}, %struct.zval* {$result}";
 
         return $result;
     }

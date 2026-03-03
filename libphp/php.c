@@ -1417,3 +1417,12 @@ int php_is_int(zval* z) {
     if (z == NULL) return 0;
     return (z->type == PHP_TYPE_INT) ? 1 : 0;
 }
+
+// isset implementation - checks if a zval is set (not null)
+// In PHP, isset() returns false only if the variable is null
+// Note: In our implementation, uninitialized variables don't exist in the zval system,
+// so we only check if the value is null
+int php_isset(zval* z) {
+    if (z == NULL) return 0;
+    return (z->type != PHP_TYPE_NULL) ? 1 : 0;
+}

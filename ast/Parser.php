@@ -36,6 +36,7 @@ use PhpCompiler\AST\PropertyAccess;
 use PhpCompiler\AST\MethodDefinition;
 use PhpCompiler\AST\MethodCall;
 use PhpCompiler\AST\CastExpression;
+use PhpCompiler\AST\TernaryExpression;
 
 class Parser
 {
@@ -948,6 +949,23 @@ class Parser
             $expression = new BinaryOperation($expression, $operator, $right, $operatorToken->line, $operatorToken->column);
         }
 
+        // Handle ternary operator (right-associative)
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_QUESTION) {
+            $questionToken = $this->consumeToken(); // Consume ?
+
+            // Check if this is the Elvis operator (?:) by looking for : immediately
+            $ifTrue = null;
+            if ($this->currentToken() && $this->currentToken()->type !== TokenType::T_COLON) {
+                // Regular ternary: condition ? ifTrue : ifFalse
+                $ifTrue = $this->parseExpression();
+            }
+
+            $this->consumeTokenOfType(TokenType::T_COLON); // Consume :
+            $ifFalse = $this->parseExpression(); // Parse the else branch
+
+            $expression = new TernaryExpression($expression, $ifTrue, $ifFalse, $questionToken->line, $questionToken->column);
+        }
+
         return $expression;
     }
 
@@ -987,6 +1005,11 @@ class Parser
         // Handle new expression: new ClassName()
         if ($token->type === TokenType::T_NEW) {
             return $this->parseNewExpression();
+        }
+
+        // Handle isset() construct
+        if ($token->type === TokenType::T_ISSET) {
+            return $this->parseIssetExpression();
         }
 
         // Handle assignment as expression: $var = expr
@@ -1231,6 +1254,25 @@ class Parser
             $arguments,
             $newToken->line,
             $newToken->column
+        );
+    }
+
+    private function parseIssetExpression(): FunctionCall
+    {
+        $issetToken = $this->consumeToken(); // Consume 'isset'
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        // Parse the variable argument
+        $argument = $this->parseExpression();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        // Return as a FunctionCall node - the LLVM generator will handle it specially
+        return new FunctionCall(
+            'isset',
+            [$argument],
+            $issetToken->line,
+            $issetToken->column
         );
     }
 

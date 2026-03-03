@@ -1,18 +1,9 @@
 <?php
 
-$salary = array(
-                "Shriram" => "500000",
-                "Gaurav" => "100000",
-                "Ram" => "30000",
-                "Sita" => "70000"
-);
-
-echo "Shriram's Salary: " . $salary["Shriram"] . "<br>";
-
-echo "Gaurav's Salary: " . $salary["Gaurav"] . "<br>";
-
-echo "Ram's Salary: " . $salary["Ram"] . "<br>";
-
-echo "Sita's Salary: " . $salary["Sita"] . "<br>";
-
-?>
+// 1. Using isset()
+echo "<strong>1. Using isset()</strong><br>";
+$var1 = "Hello, World!";
+$var2 = null;
+echo isset($var1) ? "var1 is set.<br>" : "var1 is not set.<br>";
+echo isset($var2) ? "var2 is set.<br>" : "var2 is not set.<br>";
+echo "<br>";
