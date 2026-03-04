@@ -1464,3 +1464,36 @@ void php_unset(zval* z) {
     // Set the zval to null
     php_zval_null(z);
 }
+
+// gettype implementation - returns a string representation of the zval's type
+// Matches PHP's gettype() function behavior
+void php_gettype(zval* z, zval* result) {
+    if (z == NULL) {
+        php_zval_string(result, "NULL");
+        return;
+    }
+
+    switch (z->type) {
+        case PHP_TYPE_NULL:
+            php_zval_string(result, "NULL");
+            break;
+        case PHP_TYPE_BOOL:
+            php_zval_string(result, "boolean");
+            break;
+        case PHP_TYPE_INT:
+            php_zval_string(result, "integer");
+            break;
+        case PHP_TYPE_STRING:
+            php_zval_string(result, "string");
+            break;
+        case PHP_TYPE_ARRAY:
+            php_zval_string(result, "array");
+            break;
+        case PHP_TYPE_OBJECT:
+            php_zval_string(result, "object");
+            break;
+        default:
+            php_zval_string(result, "unknown type");
+            break;
+    }
+}

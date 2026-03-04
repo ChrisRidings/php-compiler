@@ -160,6 +160,7 @@ class Generator
          $ir[] = "declare i32 @php_isset(%struct.zval*)";
          $ir[] = "declare void @php_unset(%struct.zval*)";
          $ir[] = "declare i32 @php_empty(%struct.zval*)";
+         $ir[] = "declare void @php_gettype(%struct.zval*, %struct.zval*)";
          $ir[] = "";
 
         // First pass: collect class definitions for method lookup
@@ -1054,6 +1055,9 @@ class Generator
         } elseif ($funcCall->name === 'empty') {
             $this->generateEmptyFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'gettype') {
+            $this->generateGettypeFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -1818,6 +1822,46 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateGettypeFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("gettype() expects exactly 1 argument");
+        }
+
+        // Generate the argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_gettype(arg, result)
+        $ir[] = "  call void @php_gettype(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+
+        // Since this is a statement (not used), we don't need to return anything
+        $ir[] = "";
+    }
+
+    private function generateGettypeExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("gettype() expects exactly 1 argument");
+        }
+
+        // Generate the argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_gettype(arg, result)
+        $ir[] = "  call void @php_gettype(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+
+        // Return the result pointer for further use
+        return $resultPtr;
+    }
+
     private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void
     {
         foreach ($statement->expressions as $expression) {
@@ -1885,6 +1929,8 @@ class Generator
                 return $this->generateIssetExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'empty') {
                 return $this->generateEmptyExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'gettype') {
+                return $this->generateGettypeExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval

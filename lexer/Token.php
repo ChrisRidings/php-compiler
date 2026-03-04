@@ -75,6 +75,7 @@ enum TokenType: int
     case T_ISSET = 67;           // isset keyword
     case T_UNSET = 68;           // unset keyword
     case T_EMPTY = 69;           // empty keyword
+    case T_GETTYPE = 70;         // gettype keyword
 }
 
 class Token

@@ -25,3 +25,13 @@ echo empty($var1) ? "var1 is empty.<br>" : "var1 is not empty.<br>";
 echo empty($var2) ? "var2 is empty.<br>" : "var2 is not empty.<br>";
 echo empty($var3) ? "var3 is empty.<br>" : "var3 is not empty.<br>";
 echo "<br>";
+
+// 4. Using gettype()
+echo "<strong>4. Using gettype()</strong><br>";
+$var1 = 42;
+$var2 = "PHP";
+$var3 = true;
+echo "The type of var1 is: " . gettype($var1) . "<br>";
+echo "The type of var2 is: " . gettype($var2) . "<br>";
+echo "The type of var3 is: " . gettype($var3) . "<br>";
+echo "<br>";

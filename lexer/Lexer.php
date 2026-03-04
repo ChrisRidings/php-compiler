@@ -41,6 +41,7 @@ class Lexer
         TokenType::T_ISSET->value => '/^isset\b/i',
         TokenType::T_UNSET->value => '/^unset\b/i',
         TokenType::T_EMPTY->value => '/^empty\b/i',
+        TokenType::T_GETTYPE->value => '/^gettype\b/i',
         // String literals - simple pattern that matches anything between quotes
         // Double-quoted strings can have escaped quotes, single-quoted treat \' as escape
         TokenType::T_STRING->value => '/^(?:"[^"]*"|\'[^\']*\')/',

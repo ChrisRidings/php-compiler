@@ -419,6 +419,15 @@ int php_empty(zval* z);
  */
 void php_unset(zval* z);
 
+/**
+ * Returns a string representation of the zval's type.
+ * Matches PHP's gettype() function behavior.
+ *
+ * @param z The zval to check
+ * @param result The result zval (will contain the type name string)
+ */
+void php_gettype(zval* z, zval* result);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1025,6 +1025,11 @@ class Parser
             return $this->parseEmptyExpression();
         }
 
+        // Handle gettype() construct
+        if ($token->type === TokenType::T_GETTYPE) {
+            return $this->parseGettypeExpression();
+        }
+
         // Handle assignment as expression: $var = expr
         if ($token->type === TokenType::T_VARIABLE && $this->peekToken() &&
             ($this->peekToken()->type === TokenType::T_ASSIGN ||
@@ -1395,5 +1400,44 @@ class Parser
     {
         $pos = $this->position + $offset;
         return $pos < count($this->tokens) ? $this->tokens[$pos] : null;
+    }
+
+    /**
+     * Parse gettype() construct
+     *
+     * @param FunctionDefinition|null $enclosingFunction
+     * @return FunctionCall
+     */
+    private function parseGettypeExpression(?FunctionDefinition $enclosingFunction = null): FunctionCall
+    {
+        $gettypeToken = $this->consumeToken(); // consume 'gettype'
+        $startLine = $gettypeToken->line;
+        $startColumn = $gettypeToken->column;
+
+        // Check for opening parenthesis
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LPAREN) {
+            $this->consumeToken(); // consume '('
+        } else {
+            throw new \Exception("gettype requires opening parenthesis at line " . $this->currentToken()->line ?? $startLine);
+        }
+
+        // Parse the variable or expression
+        $subExpr = $this->parseExpression($enclosingFunction);
+
+        // Check for closing parenthesis
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_RPAREN) {
+            $this->consumeToken(); // consume ')'
+        } else {
+            throw new \Exception("gettype requires closing parenthesis at line " . $this->currentToken()->line ?? $startLine);
+        }
+
+        // Create a function call with 'gettype' as the name
+        // The LLVM generator will recognize this as a builtin and handle it specially
+        return new FunctionCall(
+            'gettype',
+            [$subExpr],
+            $startLine,
+            $startColumn
+        );
     }
 }
