@@ -1418,6 +1418,32 @@ int php_is_int(zval* z) {
     return (z->type == PHP_TYPE_INT) ? 1 : 0;
 }
 
+// empty implementation - checks if a zval is empty
+// In PHP, empty() returns true for: null, false, 0, 0.0, "", "0", empty array
+int php_empty(zval* z) {
+    if (z == NULL) return 1;  // null is empty
+
+    switch (z->type) {
+        case PHP_TYPE_NULL:
+            return 1;  // null is empty
+        case PHP_TYPE_BOOL:
+            return z->value.bool_val == 0;  // false is empty
+        case PHP_TYPE_INT:
+            return z->value.int_val == 0;  // 0 is empty
+        case PHP_TYPE_STRING:
+            if (z->value.str_val == NULL) return 1;  // null string is empty
+            return strlen(z->value.str_val) == 0 || strcmp(z->value.str_val, "0") == 0;
+        case PHP_TYPE_ARRAY: {
+            struct php_array* arr = (struct php_array*)((long long)z->value.ptr_val);
+            return (arr == NULL || arr->size == 0);  // empty array is empty
+        }
+        case PHP_TYPE_OBJECT:
+            return 0;  // objects are never empty
+        default:
+            return 1;
+    }
+}
+
 // isset implementation - checks if a zval is set (not null)
 // In PHP, isset() returns false only if the variable is null
 // Note: In our implementation, uninitialized variables don't exist in the zval system,

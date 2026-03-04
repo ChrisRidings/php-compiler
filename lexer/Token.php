@@ -74,6 +74,7 @@ enum TokenType: int
     case T_QUESTION = 66;        // ? (ternary operator)
     case T_ISSET = 67;           // isset keyword
     case T_UNSET = 68;           // unset keyword
+    case T_EMPTY = 69;           // empty keyword
 }
 
 class Token

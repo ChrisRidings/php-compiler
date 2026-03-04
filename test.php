@@ -15,3 +15,13 @@ echo isset($var) ? "Before unset: var is set.<br>" : "Before unset: var is not s
 unset($var);
 echo isset($var) ? "After unset: var is set.<br>" : "After unset: var is not set.<br>";
 echo "<br>";
+
+// 3. Using empty()
+echo "<strong>3. Using empty()</strong><br>";
+$var1 = "";
+$var2 = "PHP";
+$var3 = 0;
+echo empty($var1) ? "var1 is empty.<br>" : "var1 is not empty.<br>";
+echo empty($var2) ? "var2 is empty.<br>" : "var2 is not empty.<br>";
+echo empty($var3) ? "var3 is empty.<br>" : "var3 is not empty.<br>";
+echo "<br>";

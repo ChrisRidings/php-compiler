@@ -403,6 +403,15 @@ int php_is_int(zval* z);
 int php_isset(zval* z);
 
 /**
+ * Checks if a zval is empty.
+ * In PHP, empty() returns true for: null, false, 0, 0.0, "", "0", empty array
+ *
+ * @param z The zval to check
+ * @return 1 if the zval is empty, 0 otherwise
+ */
+int php_empty(zval* z);
+
+/**
  * Unsets a zval, destroying its current value and setting it to null.
  * This mimics PHP's unset() behavior for single variables.
  *

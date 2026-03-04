@@ -1020,6 +1020,11 @@ class Parser
             return $this->parseUnsetExpression();
         }
 
+        // Handle empty() construct
+        if ($token->type === TokenType::T_EMPTY) {
+            return $this->parseEmptyExpression();
+        }
+
         // Handle assignment as expression: $var = expr
         if ($token->type === TokenType::T_VARIABLE && $this->peekToken() &&
             ($this->peekToken()->type === TokenType::T_ASSIGN ||
@@ -1300,6 +1305,25 @@ class Parser
             [$argument],
             $unsetToken->line,
             $unsetToken->column
+        );
+    }
+
+    private function parseEmptyExpression(): FunctionCall
+    {
+        $emptyToken = $this->consumeToken(); // Consume 'empty'
+        $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+        // Parse the argument
+        $argument = $this->parseExpression();
+
+        $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+        // Return as a FunctionCall node - the LLVM generator will handle it specially
+        return new FunctionCall(
+            'empty',
+            [$argument],
+            $emptyToken->line,
+            $emptyToken->column
         );
     }
 

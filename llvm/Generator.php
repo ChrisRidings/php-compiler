@@ -155,11 +155,12 @@ class Generator
         $ir[] = "; Reference counting functions";
         $ir[] = "declare void @php_zval_copy(%struct.zval*)";
         $ir[] = "declare void @php_zval_destroy(%struct.zval*)";
-        $ir[] = "; Type checking functions";
-        $ir[] = "declare i32 @php_is_int(%struct.zval*)";
-        $ir[] = "declare i32 @php_isset(%struct.zval*)";
-        $ir[] = "declare void @php_unset(%struct.zval*)";
-        $ir[] = "";
+         $ir[] = "; Type checking functions";
+         $ir[] = "declare i32 @php_is_int(%struct.zval*)";
+         $ir[] = "declare i32 @php_isset(%struct.zval*)";
+         $ir[] = "declare void @php_unset(%struct.zval*)";
+         $ir[] = "declare i32 @php_empty(%struct.zval*)";
+         $ir[] = "";
 
         // First pass: collect class definitions for method lookup
         foreach ($this->statements as $statement) {
@@ -1050,6 +1051,9 @@ class Generator
         } elseif ($funcCall->name === 'unset') {
             $this->generateUnsetFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'empty') {
+            $this->generateEmptyFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -1773,6 +1777,47 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateEmptyFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("empty() expects exactly 1 argument");
+        }
+
+        // Generate the argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_empty to check if it's empty
+        $emptyResult = $this->getNextTempVariable();
+        $ir[] = "  {$emptyResult} = call i32 @php_empty(%struct.zval* {$argPtr})";
+
+        // Store result in a zval (we need to allocate and store, but since this is a statement, we just discard)
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$emptyResult})";
+        $ir[] = "";
+    }
+
+    private function generateEmptyExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("empty() expects exactly 1 argument");
+        }
+
+        // Generate the argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_empty to check if it's empty
+        $emptyResult = $this->getNextTempVariable();
+        $ir[] = "  {$emptyResult} = call i32 @php_empty(%struct.zval* {$argPtr})";
+
+        // Store result in a zval and return pointer
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$emptyResult})";
+
+        return $resultPtr;
+    }
+
     private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void
     {
         foreach ($statement->expressions as $expression) {
@@ -1838,6 +1883,8 @@ class Generator
                 return $this->generateIsIntExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'isset') {
                 return $this->generateIssetExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'empty') {
+                return $this->generateEmptyExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval
