@@ -20,6 +20,7 @@ use PhpCompiler\AST\NullLiteral;
 use PhpCompiler\AST\UnaryOperation;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\ContinueStatement;
+use PhpCompiler\AST\BreakStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
 use PhpCompiler\AST\ForStatement;
@@ -65,6 +66,12 @@ class Generator
      * @var string[]
      */
     private array $loopHeaderStack = [];
+
+    /**
+     * Stack to track loop end blocks for break statements
+     * @var string[]
+     */
+    private array $loopEndStack = [];
 
     /**
      * Class definitions for method lookup
@@ -622,6 +629,13 @@ class Generator
             }
             $loopHeader = end($this->loopHeaderStack);
             $ir[] = "  br label %{$loopHeader}";
+        } elseif ($statement instanceof BreakStatement) {
+            // Break statement - jump to the current loop end
+            if (empty($this->loopEndStack)) {
+                throw new \RuntimeException("Break statement outside of loop at line {$statement->line}");
+            }
+            $loopEnd = end($this->loopEndStack);
+            $ir[] = "  br label %{$loopEnd}";
         } elseif ($statement instanceof ExpressionStatement) {
             // Expression statement - evaluate the expression and discard the result
             // Special handling for unset() which is a statement-level construct
@@ -2501,6 +2515,10 @@ class Generator
         // Jump to loop header
         $ir[] = "  br label %{$loopHeaderBlock}";
 
+        // Push loop header and end onto stacks for continue/break statements
+        $this->loopHeaderStack[] = $loopHeaderBlock;
+        $this->loopEndStack[] = $loopAfterBlock;
+
         // Loop header block
         $ir[] = "{$loopHeaderBlock}:";
         if ($forStmt->condition) {
@@ -2546,6 +2564,10 @@ class Generator
         // Jump back to loop header
         $ir[] = "  br label %{$loopHeaderBlock}";
 
+        // Pop loop header and end from stacks
+        array_pop($this->loopHeaderStack);
+        array_pop($this->loopEndStack);
+
         // After loop block
         $ir[] = "{$loopAfterBlock}:";
         $ir[] = "";
@@ -2561,6 +2583,10 @@ class Generator
 
         // Jump to loop header
         $ir[] = "  br label %{$loopHeaderBlock}";
+
+        // Push loop header and end onto stacks for continue/break statements
+        $this->loopHeaderStack[] = $loopHeaderBlock;
+        $this->loopEndStack[] = $loopAfterBlock;
 
         // Loop header block - evaluate condition
         $ir[] = "{$loopHeaderBlock}:";
@@ -2586,6 +2612,10 @@ class Generator
         // Jump back to loop header
         $ir[] = "  br label %{$loopHeaderBlock}";
 
+        // Pop loop header and end from stacks
+        array_pop($this->loopHeaderStack);
+        array_pop($this->loopEndStack);
+
         // After loop block
         $ir[] = "{$loopAfterBlock}:";
         $ir[] = "";
@@ -2601,6 +2631,10 @@ class Generator
 
         // Jump directly to body (do-while executes body at least once)
         $ir[] = "  br label %{$loopBodyBlock}";
+
+        // Push loop header and end onto stacks for continue/break statements
+        $this->loopHeaderStack[] = $loopHeaderBlock;
+        $this->loopEndStack[] = $loopAfterBlock;
 
         // Loop body block
         $ir[] = "{$loopBodyBlock}:";
@@ -2625,6 +2659,10 @@ class Generator
 
         // Branch if true back to body, otherwise to after loop
         $ir[] = "  br i1 {$isTrue}, label %{$loopBodyBlock}, label %{$loopAfterBlock}";
+
+        // Pop loop header and end from stacks
+        array_pop($this->loopHeaderStack);
+        array_pop($this->loopEndStack);
 
         // After loop block
         $ir[] = "{$loopAfterBlock}:";
@@ -2659,8 +2697,9 @@ class Generator
         // Jump to loop header
         $ir[] = "  br label %{$loopHeaderBlock}";
 
-        // Push loop header onto stack for continue statements
+        // Push loop header and end onto stacks for continue/break statements
         $this->loopHeaderStack[] = $loopHeaderBlock;
+        $this->loopEndStack[] = $loopAfterBlock;
 
         // Loop header block - check if index < array_size
         $ir[] = "{$loopHeaderBlock}:";
@@ -2734,8 +2773,9 @@ class Generator
         // Jump back to header
         $ir[] = "  br label %{$loopHeaderBlock}";
 
-        // Pop loop header from stack
+        // Pop loop header and end from stacks
         array_pop($this->loopHeaderStack);
+        array_pop($this->loopEndStack);
 
         // After loop block
         $ir[] = "{$loopAfterBlock}:";

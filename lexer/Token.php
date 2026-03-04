@@ -61,22 +61,23 @@ enum TokenType: int
     case T_FALSE = 53;           // false
     case T_NOT = 54;             // ! (boolean NOT)
     case T_CONTINUE = 55;        // continue
-    case T_NULL = 56;            // null
-    case T_CLASS = 57;           // class
-    case T_PUBLIC = 58;          // public
-    case T_PRIVATE = 59;         // private
-    case T_PROTECTED = 60;       // protected
-    case T_NEW = 61;             // new
-    case T_OBJECT_OPERATOR = 62; // ->
-    case T_VAR = 63;             // var (for compatibility)
-    case T_COLON = 64;           // : (return type separator)
-    case T_ARRAY = 65;           // array keyword
-    case T_QUESTION = 66;        // ? (ternary operator)
-    case T_ISSET = 67;           // isset keyword
-    case T_UNSET = 68;           // unset keyword
-    case T_EMPTY = 69;           // empty keyword
-    case T_GETTYPE = 70;         // gettype keyword
-    case T_SETTYPE = 71;         // settype keyword
+    case T_BREAK = 56;           // break
+    case T_NULL = 57;            // null
+    case T_CLASS = 58;           // class
+    case T_PUBLIC = 59;          // public
+    case T_PRIVATE = 60;         // private
+    case T_PROTECTED = 61;       // protected
+    case T_NEW = 62;             // new
+    case T_OBJECT_OPERATOR = 63; // ->
+    case T_VAR = 64;             // var (for compatibility)
+    case T_COLON = 65;           // : (return type separator)
+    case T_ARRAY = 66;           // array keyword
+    case T_QUESTION = 67;        // ? (ternary operator)
+    case T_ISSET = 68;           // isset keyword
+    case T_UNSET = 69;           // unset keyword
+    case T_EMPTY = 70;           // empty keyword
+    case T_GETTYPE = 71;         // gettype keyword
+    case T_SETTYPE = 72;         // settype keyword
 }
 
 class Token

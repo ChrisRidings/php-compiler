@@ -18,6 +18,7 @@ use PhpCompiler\AST\NullLiteral;
 use PhpCompiler\AST\UnaryOperation;
 use PhpCompiler\AST\ReturnStatement;
 use PhpCompiler\AST\ContinueStatement;
+use PhpCompiler\AST\BreakStatement;
 use PhpCompiler\AST\BinaryOperation;
 use PhpCompiler\AST\IfStatement;
 use PhpCompiler\AST\ForStatement;
@@ -147,6 +148,14 @@ class Parser
                 $this->consumeToken();
             }
             return new ContinueStatement($continueToken->line, $continueToken->column);
+        } elseif ($token->type === TokenType::T_BREAK) {
+            // Break statement
+            $breakToken = $this->consumeToken();
+            // Consume semicolon if present
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+                $this->consumeToken();
+            }
+            return new BreakStatement($breakToken->line, $breakToken->column);
         } elseif ($token->type === TokenType::T_CLASS) {
             // Class definition
             return $this->parseClassDefinition();

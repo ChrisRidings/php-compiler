@@ -30,6 +30,7 @@ class Lexer
         TokenType::T_TRUE->value => '/^true\b/i',
         TokenType::T_FALSE->value => '/^false\b/i',
         TokenType::T_CONTINUE->value => '/^continue\b/i',
+        TokenType::T_BREAK->value => '/^break\b/i',
         TokenType::T_NULL->value => '/^null\b/i',
         TokenType::T_CLASS->value => '/^class\b/i',
         TokenType::T_PUBLIC->value => '/^public\b/i',
