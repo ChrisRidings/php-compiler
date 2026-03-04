@@ -40,6 +40,7 @@ use PhpCompiler\AST\MethodDefinition;
 use PhpCompiler\AST\MethodCall;
 use PhpCompiler\AST\CastExpression;
 use PhpCompiler\AST\TernaryExpression;
+use PhpCompiler\AST\VariableFunctionCall;
 
 class Generator
 {
@@ -162,12 +163,29 @@ class Generator
          $ir[] = "declare i32 @php_empty(%struct.zval*)";
          $ir[] = "declare void @php_gettype(%struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_settype(%struct.zval*, i8*)";
+         $ir[] = "; Variable function call support";
+         $ir[] = "declare void @php_variable_call(%struct.zval*, %struct.zval*, i32, %struct.zval*)";
          $ir[] = "";
 
         // First pass: collect class definitions for method lookup
         foreach ($this->statements as $statement) {
             if ($statement instanceof ClassDefinition) {
                 $this->classDefinitions[$statement->name] = $statement;
+            }
+        }
+
+        // Separate statements into function definitions, class definitions, and other statements
+        $functionDefinitions = [];
+        $classDefinitions = [];
+        $otherStatements = [];
+
+        foreach ($this->statements as $statement) {
+            if ($statement instanceof FunctionDefinition) {
+                $functionDefinitions[] = $statement;
+            } elseif ($statement instanceof ClassDefinition) {
+                $classDefinitions[] = $statement;
+            } else {
+                $otherStatements[] = $statement;
             }
         }
 
@@ -185,27 +203,29 @@ class Generator
             $ir[] = "";
         }
 
-        $ir[] = "";
-
-        // Separate statements into function definitions, class definitions, and other statements
-        $functionDefinitions = [];
-        $classDefinitions = [];
-        $otherStatements = [];
-
-        foreach ($this->statements as $statement) {
-            if ($statement instanceof FunctionDefinition) {
-                $functionDefinitions[] = $statement;
-            } elseif ($statement instanceof ClassDefinition) {
-                $classDefinitions[] = $statement;
-            } else {
-                $otherStatements[] = $statement;
-            }
+        // Add global string constants for function names (for variable function call registration)
+        foreach ($functionDefinitions as $funcDef) {
+            $globalName = "__func_name_" . md5($funcDef->name);
+            $escapedValue = $this->escapeString($funcDef->name);
+            $funcNameLen = strlen($funcDef->name) + 1; // +1 for null terminator
+            $ir[] = "; Function name constant for {$funcDef->name}";
+            $ir[] = "@{$globalName} = private unnamed_addr constant [{$funcNameLen} x i8] c\"{$escapedValue}\\00\"";
+            $ir[] = "";
         }
 
         // Generate function definitions
         foreach ($functionDefinitions as $funcDef) {
             $this->generateStatement($funcDef, $ir, $globalVars);
         }
+
+        // Declare function registration helpers
+        $ir[] = "; Function registration helpers for variable function calls";
+        $ir[] = "declare void @php_register_function_zval_0(i8*, %struct.zval ()*)";
+        $ir[] = "declare void @php_register_function_zval_1(i8*, %struct.zval (%struct.zval)*)";
+        $ir[] = "declare void @php_register_function_zval_2(i8*, %struct.zval (%struct.zval, %struct.zval)*)";
+        $ir[] = "declare void @php_register_function_zval_3(i8*, %struct.zval (%struct.zval, %struct.zval, %struct.zval)*)";
+        $ir[] = "declare void @php_register_function_zval_4(i8*, %struct.zval (%struct.zval, %struct.zval, %struct.zval, %struct.zval)*)";
+        $ir[] = "";
 
         // Generate class definitions (which generate method functions)
         foreach ($classDefinitions as $classDef) {
@@ -218,6 +238,29 @@ class Generator
 
         // Pre-declare all variables at the entry block to ensure they dominate all uses
         $this->collectAndDeclareVariables($otherStatements, $ir);
+
+        // Register user-defined functions for variable function call support
+        foreach ($functionDefinitions as $funcDef) {
+            $globalName = "__func_name_" . md5($funcDef->name);
+            $funcNameLen = strlen($funcDef->name) + 1;
+            $ir[] = "  %{$globalName}_ptr = getelementptr inbounds [{$funcNameLen} x i8], [{$funcNameLen} x i8]* @{$globalName}, i64 0, i64 0";
+            $paramCount = count($funcDef->parameters);
+            $regFunc = match ($paramCount) {
+                0 => "php_register_function_zval_0",
+                1 => "php_register_function_zval_1",
+                2 => "php_register_function_zval_2",
+                3 => "php_register_function_zval_3",
+                default => "php_register_function_zval_4"
+            };
+            // Build LLVM function type signature: %struct.zval (%struct.zval, %struct.zval, ...)*
+            $paramTypes = ($paramCount > 0) ? implode(', ', array_fill(0, $paramCount, '%struct.zval')) : '';
+            $funcType = "{$paramTypes}";
+            $funcTypeStr = $paramTypes ? "{$funcType})*" : ")*";
+            $ir[] = "  call void @{$regFunc}(i8* %{$globalName}_ptr, %struct.zval ({$funcTypeStr} @{$funcDef->name})";
+        }
+        if (count($functionDefinitions) > 0) {
+            $ir[] = "";
+        }
 
         // Generate code for other statements
         foreach ($otherStatements as $statement) {
@@ -2042,6 +2085,8 @@ class Generator
             return $this->generateCastExpression($expression, $ir, $globalVars);
         } elseif ($expression instanceof TernaryExpression) {
             return $this->generateTernaryExpression($expression, $ir, $globalVars);
+        } elseif ($expression instanceof VariableFunctionCall) {
+            return $this->generateVariableFunctionCall($expression, $ir, $globalVars);
         } else {
             throw new \RuntimeException(
                 sprintf(
@@ -3117,5 +3162,45 @@ class Generator
         // but not the null terminator - we'll add that separately in generate()
         $escapedStr = $this->escapeString($str);
         return strlen($escapedStr) + 1; // +1 for null terminator
+    }
+
+    private function generateVariableFunctionCall(VariableFunctionCall $varFuncCall, array &$ir, array $globalVars): string
+    {
+        // Generate the variable expression (which contains the function name as a string)
+        $funcNamePtr = $this->generateExpression($varFuncCall->nameExpression, $ir, $globalVars);
+
+        // Allocate result zval
+        $result = $this->getNextTempVariable();
+        $ir[] = "  {$result} = alloca %struct.zval";
+
+        // Generate arguments - pass as array of zvals
+        $argCount = count($varFuncCall->arguments);
+        if ($argCount > 0) {
+            // Allocate array for arguments
+            $argsArray = $this->getNextTempVariable();
+            $ir[] = "  {$argsArray} = alloca [%struct.zval x {$argCount}]";
+
+            foreach ($varFuncCall->arguments as $i => $arg) {
+                $argPtr = $this->generateExpression($arg, $ir, $globalVars);
+                $argVal = $this->getNextTempVariable();
+                $ir[] = "  {$argVal} = load %struct.zval, %struct.zval* {$argPtr}";
+                $elemPtr = $this->getNextTempVariable();
+                $ir[] = "  {$elemPtr} = getelementptr inbounds [%struct.zval x {$argCount}], [%struct.zval x {$argCount}]* {$argsArray}, i64 0, i64 {$i}";
+                $ir[] = "  store %struct.zval {$argVal}, %struct.zval* {$elemPtr}";
+            }
+
+            // Get pointer to first element for the call
+            $argsPtr = $this->getNextTempVariable();
+            $ir[] = "  {$argsPtr} = getelementptr inbounds [%struct.zval x {$argCount}], [%struct.zval x {$argCount}]* {$argsArray}, i64 0, i64 0";
+        } else {
+            // No arguments - pass null pointer
+            $argsPtr = "null";
+        }
+
+        // Call the runtime dispatch function with the function name zval directly
+        // void php_variable_call(zval* func_name_zval, zval* args, int arg_count, zval* result)
+        $ir[] = "  call void @php_variable_call(%struct.zval* {$funcNamePtr}, %struct.zval* {$argsPtr}, i32 {$argCount}, %struct.zval* {$result})";
+
+        return $result;
     }
 }

@@ -37,6 +37,7 @@ use PhpCompiler\AST\MethodDefinition;
 use PhpCompiler\AST\MethodCall;
 use PhpCompiler\AST\CastExpression;
 use PhpCompiler\AST\TernaryExpression;
+use PhpCompiler\AST\VariableFunctionCall;
 
 class Parser
 {
@@ -160,6 +161,15 @@ class Parser
                 $this->consumeToken();
             }
             return new ExpressionStatement($settypeExpr, $token->line, $token->column);
+        } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_LPAREN) {
+            // Variable function call as statement: $functionName()
+            $varFuncCall = $this->parsePrimary();
+            // Check for semicolon
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+                $this->consumeToken();
+            }
+            // Create an expression statement to wrap the variable function call
+            return new ExpressionStatement($varFuncCall, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_OBJECT_OPERATOR) {
             // Property access: $obj->property (potentially with assignment)
             return $this->parsePropertyAccessStatement();
@@ -1109,6 +1119,14 @@ class Parser
                     // It's a property access
                     $expression = new PropertyAccess($expression, $propertyToken->value, $token->line, $token->column);
                 }
+            }
+
+            // Handle variable function call: $var(args) - call function by name stored in variable
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LPAREN) {
+                $this->consumeToken(); // consume (
+                $arguments = $this->parseArguments();
+                $this->consumeTokenOfType(TokenType::T_RPAREN);
+                return new VariableFunctionCall($expression, $arguments, $token->line, $token->column);
             }
 
             // Handle postfix increment/decrement on property accesses and variables

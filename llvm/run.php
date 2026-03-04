@@ -41,6 +41,7 @@ require_once __DIR__ . '/../ast/MethodDefinition.php';
 require_once __DIR__ . '/../ast/MethodCall.php';
 require_once __DIR__ . '/../ast/CastExpression.php';
 require_once __DIR__ . '/../ast/TernaryExpression.php';
+require_once __DIR__ . '/../ast/VariableFunctionCall.php';
 require_once __DIR__ . '/../ast/Parser.php';
 require_once __DIR__ . '/Generator.php';
 

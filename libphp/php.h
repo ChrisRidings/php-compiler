@@ -439,6 +439,40 @@ void php_gettype(zval* z, zval* result);
  */
 int php_settype(zval* z, const char* type);
 
+/**
+ * Calls a function by name with the given arguments.
+ * This is used for variable function calls like $func_name().
+ *
+ * @param func_name_zval The function name as a zval (should be a string)
+ * @param args Array of argument zvals
+ * @param arg_count Number of arguments
+ * @param result Pointer to zval to store the result
+ */
+void php_variable_call(zval* func_name_zval, zval* args, int arg_count, zval* result);
+
+/**
+ * Registers a user-defined function for variable function calls.
+ * These should be called at program startup for each user-defined function.
+ * Supports different function signatures based on parameter count and return type.
+ *
+ * @param name The function name
+ * @param func Pointer to the function
+ */
+
+/* Void functions (no return value) */
+void php_register_function_void_0(const char* name, void (*func)(void));
+
+/* Zval-returning functions (PHP-style return) */
+void php_register_function_zval_0(const char* name, zval (*func)(void));
+void php_register_function_zval_1(const char* name, zval (*func)(zval));
+void php_register_function_zval_2(const char* name, zval (*func)(zval, zval));
+void php_register_function_zval_3(const char* name, zval (*func)(zval, zval, zval));
+void php_register_function_zval_4(const char* name, zval (*func)(zval, zval, zval, zval));
+
+/* Compatibility macro for existing code */
+#define php_register_function(name, func, is_void) \
+    php_register_function_void_0(name, (void (*)(void))func)
+
 #ifdef __cplusplus
 }
 #endif

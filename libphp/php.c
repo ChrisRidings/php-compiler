@@ -171,6 +171,10 @@ char* php_zval_to_string(const zval* z) {
     char* buffer = buffers[index];
     index = (index + 1) % 8;
 
+    if (z == NULL) {
+        return "";
+    }
+
     switch (z->type) {
         case PHP_TYPE_NULL:
             return "";  // PHP: null converts to empty string in concatenation
@@ -1588,4 +1592,303 @@ int php_settype(zval* z, const char* type) {
     }
 
     return 1;  // Success
+}
+
+// Function registry for user-defined functions
+#define MAX_REGISTERED_FUNCTIONS 256
+
+// Function pointer types for different signatures
+typedef void (*php_void_func_0_t)(void);
+typedef void (*php_void_func_1_t)(zval*);
+typedef void (*php_void_func_2_t)(zval*, zval*);
+typedef void (*php_void_func_3_t)(zval*, zval*, zval*);
+typedef void (*php_void_func_4_t)(zval*, zval*, zval*, zval*);
+typedef zval (*php_zval_func_0_t)(void);
+typedef zval (*php_zval_func_1_t)(zval);
+typedef zval (*php_zval_func_2_t)(zval, zval);
+typedef zval (*php_zval_func_3_t)(zval, zval, zval);
+typedef zval (*php_zval_func_4_t)(zval, zval, zval, zval);
+
+typedef enum {
+    PHP_FUNC_VOID_0,
+    PHP_FUNC_VOID_1,
+    PHP_FUNC_VOID_2,
+    PHP_FUNC_VOID_3,
+    PHP_FUNC_VOID_4,
+    PHP_FUNC_ZVAL_0,
+    PHP_FUNC_ZVAL_1,
+    PHP_FUNC_ZVAL_2,
+    PHP_FUNC_ZVAL_3,
+    PHP_FUNC_ZVAL_4
+} php_func_sig_t;
+
+typedef struct {
+    char* name;
+    void* func;
+    php_func_sig_t sig;
+} php_function_entry;
+
+static php_function_entry function_registry[MAX_REGISTERED_FUNCTIONS];
+static int function_registry_count = 0;
+
+// Register a function in the registry
+void php_register_function_void_0(const char* name, php_void_func_0_t func) {
+    if (function_registry_count >= MAX_REGISTERED_FUNCTIONS || name == NULL) return;
+    function_registry[function_registry_count].name = strdup(name);
+    function_registry[function_registry_count].func = (void*)func;
+    function_registry[function_registry_count].sig = PHP_FUNC_VOID_0;
+    function_registry_count++;
+}
+
+void php_register_function_zval_0(const char* name, php_zval_func_0_t func) {
+    if (function_registry_count >= MAX_REGISTERED_FUNCTIONS || name == NULL) return;
+    function_registry[function_registry_count].name = strdup(name);
+    function_registry[function_registry_count].func = (void*)func;
+    function_registry[function_registry_count].sig = PHP_FUNC_ZVAL_0;
+    function_registry_count++;
+}
+
+void php_register_function_zval_1(const char* name, php_zval_func_1_t func) {
+    if (function_registry_count >= MAX_REGISTERED_FUNCTIONS || name == NULL) return;
+    function_registry[function_registry_count].name = strdup(name);
+    function_registry[function_registry_count].func = (void*)func;
+    function_registry[function_registry_count].sig = PHP_FUNC_ZVAL_1;
+    function_registry_count++;
+}
+
+void php_register_function_zval_2(const char* name, php_zval_func_2_t func) {
+    if (function_registry_count >= MAX_REGISTERED_FUNCTIONS || name == NULL) return;
+    function_registry[function_registry_count].name = strdup(name);
+    function_registry[function_registry_count].func = (void*)func;
+    function_registry[function_registry_count].sig = PHP_FUNC_ZVAL_2;
+    function_registry_count++;
+}
+
+void php_register_function_zval_3(const char* name, php_zval_func_3_t func) {
+    if (function_registry_count >= MAX_REGISTERED_FUNCTIONS || name == NULL) return;
+    function_registry[function_registry_count].name = strdup(name);
+    function_registry[function_registry_count].func = (void*)func;
+    function_registry[function_registry_count].sig = PHP_FUNC_ZVAL_3;
+    function_registry_count++;
+}
+
+void php_register_function_zval_4(const char* name, php_zval_func_4_t func) {
+    if (function_registry_count >= MAX_REGISTERED_FUNCTIONS || name == NULL) return;
+    function_registry[function_registry_count].name = strdup(name);
+    function_registry[function_registry_count].func = (void*)func;
+    function_registry[function_registry_count].sig = PHP_FUNC_ZVAL_4;
+    function_registry_count++;
+}
+
+// Look up a function in the registry
+static php_function_entry* php_lookup_function(const char* name) {
+    for (int i = 0; i < function_registry_count; i++) {
+        if (strcmp(function_registry[i].name, name) == 0) {
+            return &function_registry[i];
+        }
+    }
+    return NULL;
+}
+
+// Variable function call - dispatches to functions by name
+// Supports both built-in and registered user-defined functions
+void php_variable_call(zval* func_name_zval, zval* args, int arg_count, zval* result) {
+    // Initialize result to null
+    php_zval_null(result);
+
+    if (func_name_zval == NULL) {
+        return;
+    }
+
+    // Extract the function name from the zval
+    const char* func_name = php_zval_to_string(func_name_zval);
+
+    if (func_name == NULL || func_name[0] == '\0') {
+        return;
+    }
+
+    // First, check if it's a registered user-defined function
+    php_function_entry* entry = php_lookup_function(func_name);
+    if (entry != NULL) {
+        // Call the registered function with the correct signature
+        switch (entry->sig) {
+            case PHP_FUNC_VOID_0: {
+                php_void_func_0_t func = (php_void_func_0_t)entry->func;
+                func();
+                php_zval_null(result);
+                break;
+            }
+            case PHP_FUNC_ZVAL_0: {
+                php_zval_func_0_t func = (php_zval_func_0_t)entry->func;
+                *result = func();
+                break;
+            }
+            case PHP_FUNC_ZVAL_1: {
+                php_zval_func_1_t func = (php_zval_func_1_t)entry->func;
+                if (arg_count >= 1) {
+                    *result = func(args[0]);
+                } else {
+                    zval null_zval;
+                    php_zval_null(&null_zval);
+                    *result = func(null_zval);
+                }
+                break;
+            }
+            case PHP_FUNC_ZVAL_2: {
+                php_zval_func_2_t func = (php_zval_func_2_t)entry->func;
+                zval a, b;
+                php_zval_null(&a);
+                php_zval_null(&b);
+                if (arg_count >= 1) a = args[0];
+                if (arg_count >= 2) b = args[1];
+                *result = func(a, b);
+                break;
+            }
+            case PHP_FUNC_ZVAL_3: {
+                php_zval_func_3_t func = (php_zval_func_3_t)entry->func;
+                zval a, b, c;
+                php_zval_null(&a);
+                php_zval_null(&b);
+                php_zval_null(&c);
+                if (arg_count >= 1) a = args[0];
+                if (arg_count >= 2) b = args[1];
+                if (arg_count >= 3) c = args[2];
+                *result = func(a, b, c);
+                break;
+            }
+            case PHP_FUNC_ZVAL_4: {
+                php_zval_func_4_t func = (php_zval_func_4_t)entry->func;
+                zval a, b, c, d;
+                php_zval_null(&a);
+                php_zval_null(&b);
+                php_zval_null(&c);
+                php_zval_null(&d);
+                if (arg_count >= 1) a = args[0];
+                if (arg_count >= 2) b = args[1];
+                if (arg_count >= 3) c = args[2];
+                if (arg_count >= 4) d = args[3];
+                *result = func(a, b, c, d);
+                break;
+            }
+            default:
+                php_zval_null(result);
+                break;
+        }
+        return;
+    }
+
+    // Support for strlen-like functionality (using trim as a proxy for string functions)
+    if (strcmp(func_name, "strlen") == 0) {
+        if (arg_count >= 1 && args[0].type == PHP_TYPE_STRING && args[0].value.str_val != NULL) {
+            php_zval_int(result, strlen(args[0].value.str_val));
+        } else {
+            php_zval_int(result, 0);
+        }
+        return;
+    }
+
+    // Support for echo (returns null)
+    if (strcmp(func_name, "echo") == 0) {
+        for (int i = 0; i < arg_count; i++) {
+            php_echo_zval(&args[i]);
+        }
+        php_zval_null(result);
+        return;
+    }
+
+    // Support for trim
+    if (strcmp(func_name, "trim") == 0) {
+        if (arg_count >= 1) {
+            php_trim(&args[0], result);
+        } else {
+            php_zval_string(result, "");
+        }
+        return;
+    }
+
+    // Support for count
+    if (strcmp(func_name, "count") == 0) {
+        if (arg_count >= 1 && args[0].type == PHP_TYPE_ARRAY) {
+            php_zval_int(result, php_array_size(&args[0]));
+        } else {
+            php_zval_int(result, 0);
+        }
+        return;
+    }
+
+    // Support for file_exists
+    if (strcmp(func_name, "file_exists") == 0) {
+        if (arg_count >= 1) {
+            php_file_exists(&args[0], result);
+        } else {
+            php_zval_bool(result, 0);
+        }
+        return;
+    }
+
+    // Support for empty
+    if (strcmp(func_name, "empty") == 0) {
+        if (arg_count >= 1) {
+            php_zval_bool(result, php_empty(&args[0]));
+        } else {
+            php_zval_bool(result, 1);
+        }
+        return;
+    }
+
+    // Support for gettype
+    if (strcmp(func_name, "gettype") == 0) {
+        if (arg_count >= 1) {
+            php_gettype(&args[0], result);
+        } else {
+            php_zval_null(result);
+        }
+        return;
+    }
+
+    // Support for is_int
+    if (strcmp(func_name, "is_int") == 0) {
+        if (arg_count >= 1) {
+            php_zval_bool(result, php_is_int(&args[0]));
+        } else {
+            php_zval_bool(result, 0);
+        }
+        return;
+    }
+
+    // Support for isset
+    if (strcmp(func_name, "isset") == 0) {
+        if (arg_count >= 1) {
+            php_zval_bool(result, php_isset(&args[0]));
+        } else {
+            php_zval_bool(result, 0);
+        }
+        return;
+    }
+
+    // Support for str_replace
+    if (strcmp(func_name, "str_replace") == 0) {
+        if (arg_count >= 3) {
+            php_str_replace(&args[0], &args[1], &args[2], result);
+        } else {
+            php_zval_string(result, "");
+        }
+        return;
+    }
+
+    // Support for array_values
+    if (strcmp(func_name, "array_values") == 0) {
+        if (arg_count >= 1 && args[0].type == PHP_TYPE_ARRAY) {
+            php_array_values(&args[0], result);
+        } else {
+            php_zval_null(result);
+        }
+        return;
+    }
+
+    // If function not found, return null
+    // In a full implementation, this would look up user-defined functions
+    // from a function registry
+    php_zval_null(result);
+    return;
 }
