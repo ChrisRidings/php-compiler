@@ -263,6 +263,14 @@ void php_natsort(zval* arr, zval* result);
 void php_print_r(zval* value, zval* result);
 
 /**
+ * Dumps detailed information about a variable (type and value).
+ * Mimics PHP's var_dump() function.
+ *
+ * @param value The value to dump
+ */
+void php_var_dump(zval* value);
+
+/**
  * Repeats a string a specified number of times.
  *
  * @param str The string to repeat

@@ -806,6 +806,92 @@ void php_print_r(zval* value, zval* result) {
     php_zval_bool(result, 1);  // return true
 }
 
+// Helper for var_dump indentation
+static void var_dump_indent(int depth) {
+    for (int i = 0; i < depth; i++) {
+        php_echo("  ");
+    }
+}
+
+// Helper to recursively dump a zval with var_dump format
+static void var_dump_recursive(zval* value, int depth) {
+    var_dump_indent(depth);
+
+    switch (value->type) {
+        case PHP_TYPE_NULL:
+            php_echo("NULL\n");
+            break;
+
+        case PHP_TYPE_BOOL:
+            php_echo(value->value.bool_val ? "bool(true)\n" : "bool(false)\n");
+            break;
+
+        case PHP_TYPE_INT:
+            {
+                char buf[32];
+                sprintf(buf, "int(%d)\n", value->value.int_val);
+                php_echo(buf);
+            }
+            break;
+
+        case PHP_TYPE_STRING:
+            if (value->value.str_val) {
+                size_t len = strlen(value->value.str_val);
+                char buf[64];
+                sprintf(buf, "string(%zu) \"%s\"\n", len, value->value.str_val);
+                php_echo(buf);
+            } else {
+                php_echo("string(0) \"\"\n");
+            }
+            break;
+
+        case PHP_TYPE_ARRAY:
+            {
+                php_array* arr = (php_array*)((long long)value->value.ptr_val);
+                if (arr) {
+                    char buf[64];
+                    sprintf(buf, "array(%d) {\n", arr->size);
+                    php_echo(buf);
+
+                    for (int i = 0; i < arr->size; i++) {
+                        var_dump_indent(depth + 1);
+                        php_echo("[");
+                        if (arr->elements[i].key) {
+                            php_echo(arr->elements[i].key);
+                        } else {
+                            char idx[16];
+                            sprintf(idx, "%d", i);
+                            php_echo(idx);
+                        }
+                        php_echo("]=>\n");
+                        var_dump_recursive(&arr->elements[i].value, depth + 1);
+                    }
+
+                    var_dump_indent(depth);
+                    php_echo("}\n");
+                } else {
+                    php_echo("array(0) {\n");
+                    var_dump_indent(depth);
+                    php_echo("}\n");
+                }
+            }
+            break;
+
+        case PHP_TYPE_OBJECT:
+            php_echo("object\n");
+            break;
+
+        default:
+            php_echo("unknown\n");
+            break;
+    }
+}
+
+// var_dump implementation - dumps detailed information about a variable
+void php_var_dump(zval* value) {
+    var_dump_recursive(value, 0);
+}
+
 // str_repeat implementation
 void php_str_repeat(zval* str, zval* count, zval* result) {
     if (str->type != PHP_TYPE_STRING || str->value.str_val == NULL) {

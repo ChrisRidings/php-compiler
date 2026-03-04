@@ -133,6 +133,7 @@ class Generator
         $ir[] = "declare i32 @php_array_size(%struct.zval*)";
         $ir[] = "declare i8* @php_array_get_key(%struct.zval*, i32)";
         $ir[] = "declare void @php_array_values(%struct.zval*, %struct.zval*)";
+        $ir[] = "declare void @php_var_dump(%struct.zval*)";
         $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
@@ -1060,6 +1061,9 @@ class Generator
         } elseif ($funcCall->name === 'print_r') {
             $this->generatePrintRFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'var_dump') {
+            $this->generateVarDumpFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'str_repeat') {
             $this->generateStrRepeatFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1267,6 +1271,20 @@ class Generator
 
         // Call php_print_r function
         $ir[] = "  call void @php_print_r(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateVarDumpFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("var_dump() expects exactly 1 argument");
+        }
+
+        // Generate the value argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_var_dump function (void return - outputs directly)
+        $ir[] = "  call void @php_var_dump(%struct.zval* {$argPtr})";
         $ir[] = "";
     }
 
@@ -1610,6 +1628,26 @@ class Generator
         $resultPtr = $this->getNextTempVariable();
         $ir[] = "  {$resultPtr} = alloca %struct.zval";
         $ir[] = "  call void @php_print_r(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        return $resultPtr;
+    }
+
+    private function generateVarDumpExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("var_dump() expects exactly 1 argument");
+        }
+
+        // Generate the value argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Call php_var_dump function (void return - outputs directly)
+        $ir[] = "  call void @php_var_dump(%struct.zval* {$argPtr})";
+
+        // Return NULL zval since var_dump returns void
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_null(%struct.zval* {$resultPtr})";
+
         return $resultPtr;
     }
 
@@ -2023,6 +2061,8 @@ class Generator
                 return $this->generateNatsortExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'print_r') {
                 return $this->generatePrintRExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'var_dump') {
+                return $this->generateVarDumpExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'str_repeat') {
                 return $this->generateStrRepeatExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'trim') {
