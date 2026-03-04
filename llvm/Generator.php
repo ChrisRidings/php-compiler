@@ -161,6 +161,7 @@ class Generator
          $ir[] = "declare void @php_unset(%struct.zval*)";
          $ir[] = "declare i32 @php_empty(%struct.zval*)";
          $ir[] = "declare void @php_gettype(%struct.zval*, %struct.zval*)";
+         $ir[] = "declare i32 @php_settype(%struct.zval*, i8*)";
          $ir[] = "";
 
         // First pass: collect class definitions for method lookup
@@ -1058,6 +1059,9 @@ class Generator
         } elseif ($funcCall->name === 'gettype') {
             $this->generateGettypeFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'settype') {
+            $this->generateSettypeFunctionCall($funcCall, $ir, $globalVars);
+            return;
         }
 
         // Generate arguments
@@ -1862,6 +1866,75 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateSettypeExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("settype() expects exactly 2 arguments");
+        }
+
+        // First argument should be a variable reference (the one to convert)
+        $varExpr = $funcCall->arguments[0];
+        if (!$varExpr instanceof VariableReference) {
+            throw new \RuntimeException("settype() first argument must be a variable");
+        }
+
+        // Get the variable name and construct pointer
+        $varName = $varExpr->name;
+        $varPtr = "%{$varName}";
+
+        // Second argument is the type string
+        $typeExpr = $funcCall->arguments[1];
+        $typePtr = $this->generateExpression($typeExpr, $ir, $globalVars);
+
+        // Get the string value from the type zval using php_zval_to_string helper
+        $typeStrVal = $this->getNextTempVariable();
+        $ir[] = "  {$typeStrVal} = call i8* @php_zval_to_string(%struct.zval* {$typePtr})";
+
+        // Call php_settype(var, type_string) - returns i32 (1 for success, 0 for failure)
+        $resultVar = $this->getNextTempVariable();
+        $ir[] = "  {$resultVar} = call i32 @php_settype(%struct.zval* {$varPtr}, i8* {$typeStrVal})";
+
+        // Store result in a zval (boolean indicating success)
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$resultVar})";
+
+        return $resultPtr;
+    }
+
+    private function generateSettypeFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("settype() expects exactly 2 arguments");
+        }
+
+        // First argument should be a variable reference (the one to convert)
+        $varExpr = $funcCall->arguments[0];
+        if (!$varExpr instanceof VariableReference) {
+            throw new \RuntimeException("settype() first argument must be a variable");
+        }
+
+        // Get the variable name and construct pointer
+        $varName = $varExpr->name;
+        $varPtr = "%{$varName}";
+
+        // Second argument is the type string
+        $typeExpr = $funcCall->arguments[1];
+        $typePtr = $this->generateExpression($typeExpr, $ir, $globalVars);
+
+        // Get the string value from the type zval using php_zval_to_string helper
+        $typeStrVal = $this->getNextTempVariable();
+        $ir[] = "  {$typeStrVal} = call i8* @php_zval_to_string(%struct.zval* {$typePtr})";
+
+        // Call php_settype(var, type_string) - returns i32 (1 for success, 0 for failure)
+        $resultVar = $this->getNextTempVariable();
+        $ir[] = "  {$resultVar} = call i32 @php_settype(%struct.zval* {$varPtr}, i8* {$typeStrVal})";
+
+        // Since settype is typically used as a statement, we don't need to store the result
+        // But we should have it available if needed
+        $ir[] = "";
+    }
+
     private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void
     {
         foreach ($statement->expressions as $expression) {
@@ -1931,6 +2004,8 @@ class Generator
                 return $this->generateEmptyExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'gettype') {
                 return $this->generateGettypeExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'settype') {
+                return $this->generateSettypeExpression($expression, $ir, $globalVars);
             }
 
             // Function calls as expressions: generate call and return pointer to result zval

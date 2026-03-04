@@ -1497,3 +1497,70 @@ void php_gettype(zval* z, zval* result) {
             break;
     }
 }
+
+// settype implementation - converts a variable to a specified type
+// Returns 1 on success, 0 on failure
+int php_settype(zval* z, const char* type) {
+    if (z == NULL || type == NULL) {
+        return 0;
+    }
+
+    // Store current value for conversion
+    zval temp;
+    temp = *z;
+    php_zval_copy(&temp);  // Increment refcount to preserve original
+
+    // Destroy current value before converting
+    php_zval_destroy(z);
+
+    // Convert based on requested type
+    if (strcmp(type, "integer") == 0 || strcmp(type, "int") == 0) {
+        z->type = PHP_TYPE_INT;
+        z->refcount = 1;
+        z->value.int_val = php_zval_to_int(&temp);
+    } else if (strcmp(type, "boolean") == 0 || strcmp(type, "bool") == 0) {
+        z->type = PHP_TYPE_BOOL;
+        z->refcount = 1;
+        // In PHP, non-zero integers, non-empty strings, and arrays are true
+        z->value.bool_val = 0;
+        switch (temp.type) {
+            case PHP_TYPE_NULL:
+                z->value.bool_val = 0;
+                break;
+            case PHP_TYPE_BOOL:
+                z->value.bool_val = temp.value.bool_val;
+                break;
+            case PHP_TYPE_INT:
+                z->value.bool_val = (temp.value.int_val != 0);
+                break;
+            case PHP_TYPE_STRING:
+                if (temp.value.str_val != NULL && strlen(temp.value.str_val) > 0 && strcmp(temp.value.str_val, "0") != 0) {
+                    z->value.bool_val = 1;
+                } else {
+                    z->value.bool_val = 0;
+                }
+                break;
+            case PHP_TYPE_ARRAY:
+            case PHP_TYPE_OBJECT:
+                z->value.bool_val = 1;
+                break;
+        }
+    } else if (strcmp(type, "string") == 0) {
+        z->type = PHP_TYPE_STRING;
+        z->refcount = 1;
+        char* str = php_zval_to_string(&temp);
+        z->value.str_val = strdup(str);
+    } else if (strcmp(type, "NULL") == 0 || strcmp(type, "null") == 0) {
+        z->type = PHP_TYPE_NULL;
+        z->refcount = 1;
+    } else {
+        // Unknown type - restore original value
+        *z = temp;
+        php_zval_copy(z);  // Increment refcount since we'll decrement at end
+        php_zval_destroy(&temp);
+        return 0;  // Failure
+    }
+
+    php_zval_destroy(&temp);
+    return 1;  // Success
+}

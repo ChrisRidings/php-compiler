@@ -152,6 +152,14 @@ class Parser
         } elseif ($token->type === TokenType::T_UNSET) {
             // unset() statement
             return $this->parseUnsetStatement();
+        } elseif ($token->type === TokenType::T_SETTYPE) {
+            // settype() statement
+            $settypeExpr = $this->parseSettypeExpression();
+            // Consume semicolon if present
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
+                $this->consumeToken();
+            }
+            return new ExpressionStatement($settypeExpr, $token->line, $token->column);
         } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_OBJECT_OPERATOR) {
             // Property access: $obj->property (potentially with assignment)
             return $this->parsePropertyAccessStatement();
@@ -1030,6 +1038,11 @@ class Parser
             return $this->parseGettypeExpression();
         }
 
+        // Handle settype() construct
+        if ($token->type === TokenType::T_SETTYPE) {
+            return $this->parseSettypeExpression();
+        }
+
         // Handle assignment as expression: $var = expr
         if ($token->type === TokenType::T_VARIABLE && $this->peekToken() &&
             ($this->peekToken()->type === TokenType::T_ASSIGN ||
@@ -1436,6 +1449,54 @@ class Parser
         return new FunctionCall(
             'gettype',
             [$subExpr],
+            $startLine,
+            $startColumn
+        );
+    }
+
+    /**
+     * Parse settype() construct
+     *
+     * @param FunctionDefinition|null $enclosingFunction
+     * @return FunctionCall
+     */
+    private function parseSettypeExpression(?FunctionDefinition $enclosingFunction = null): FunctionCall
+    {
+        $settypeToken = $this->consumeToken(); // consume 'settype'
+        $startLine = $settypeToken->line;
+        $startColumn = $settypeToken->column;
+
+        // Check for opening parenthesis
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_LPAREN) {
+            $this->consumeToken(); // consume '('
+        } else {
+            throw new \Exception("settype requires opening parenthesis at line " . $this->currentToken()->line ?? $startLine);
+        }
+
+        // Parse the variable (first argument)
+        $varExpr = $this->parseExpression($enclosingFunction);
+
+        // Check for comma
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_COMMA) {
+            $this->consumeToken(); // consume ','
+        } else {
+            throw new \Exception("settype requires two arguments separated by comma at line " . $this->currentToken()->line ?? $startLine);
+        }
+
+        // Parse the type string (second argument)
+        $typeExpr = $this->parseExpression($enclosingFunction);
+
+        // Check for closing parenthesis
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_RPAREN) {
+            $this->consumeToken(); // consume ')'
+        } else {
+            throw new \Exception("settype requires closing parenthesis at line " . $this->currentToken()->line ?? $startLine);
+        }
+
+        // Create a function call with 'settype' as the name
+        return new FunctionCall(
+            'settype',
+            [$varExpr, $typeExpr],
             $startLine,
             $startColumn
         );

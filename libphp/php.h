@@ -428,6 +428,17 @@ void php_unset(zval* z);
  */
 void php_gettype(zval* z, zval* result);
 
+/**
+ * Converts a zval to a specified type.
+ * Matches PHP's settype() function behavior.
+ * Returns 1 on success, 0 on failure.
+ *
+ * @param z The zval to convert (modified in place)
+ * @param type The target type ("integer", "boolean", "string", "NULL")
+ * @return 1 on success, 0 on failure
+ */
+int php_settype(zval* z, const char* type);
+
 #ifdef __cplusplus
 }
 #endif

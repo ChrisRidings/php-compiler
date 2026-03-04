@@ -35,3 +35,11 @@ echo "The type of var1 is: " . gettype($var1) . "<br>";
 echo "The type of var2 is: " . gettype($var2) . "<br>";
 echo "The type of var3 is: " . gettype($var3) . "<br>";
 echo "<br>";
+
+// 5. Using settype()
+echo "<strong>5. Using settype()</strong><br>";
+$var = "123"; // Initially a string
+echo "Before settype(): Type of var is: " . gettype($var) . "<br>";
+settype($var, "integer"); // Change type to integer
+echo "After settype(): Type of var is: " . gettype($var) . "<br>";
+echo "<br>";
