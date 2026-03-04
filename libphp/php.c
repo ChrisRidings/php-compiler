@@ -1505,10 +1505,22 @@ int php_settype(zval* z, const char* type) {
         return 0;
     }
 
-    // Store current value for conversion
-    zval temp;
-    temp = *z;
-    php_zval_copy(&temp);  // Increment refcount to preserve original
+    // Store current type for conversion
+    int old_type = z->type;
+
+    // For strings, we need to duplicate the string before destroying the original
+    char* old_str = NULL;
+    if (old_type == PHP_TYPE_STRING && z->value.str_val != NULL) {
+        old_str = strdup(z->value.str_val);
+    }
+    int old_int = 0;
+    if (old_type == PHP_TYPE_INT) {
+        old_int = z->value.int_val;
+    }
+    int old_bool = 0;
+    if (old_type == PHP_TYPE_BOOL) {
+        old_bool = z->value.bool_val;
+    }
 
     // Destroy current value before converting
     php_zval_destroy(z);
@@ -1517,50 +1529,63 @@ int php_settype(zval* z, const char* type) {
     if (strcmp(type, "integer") == 0 || strcmp(type, "int") == 0) {
         z->type = PHP_TYPE_INT;
         z->refcount = 1;
-        z->value.int_val = php_zval_to_int(&temp);
+        if (old_type == PHP_TYPE_STRING && old_str != NULL) {
+            z->value.int_val = atoi(old_str);
+            free(old_str);
+        } else if (old_type == PHP_TYPE_INT) {
+            z->value.int_val = old_int;
+        } else if (old_type == PHP_TYPE_BOOL) {
+            z->value.int_val = old_bool;
+        } else {
+            z->value.int_val = 0;
+        }
     } else if (strcmp(type, "boolean") == 0 || strcmp(type, "bool") == 0) {
         z->type = PHP_TYPE_BOOL;
         z->refcount = 1;
         // In PHP, non-zero integers, non-empty strings, and arrays are true
-        z->value.bool_val = 0;
-        switch (temp.type) {
-            case PHP_TYPE_NULL:
-                z->value.bool_val = 0;
-                break;
-            case PHP_TYPE_BOOL:
-                z->value.bool_val = temp.value.bool_val;
-                break;
-            case PHP_TYPE_INT:
-                z->value.bool_val = (temp.value.int_val != 0);
-                break;
-            case PHP_TYPE_STRING:
-                if (temp.value.str_val != NULL && strlen(temp.value.str_val) > 0 && strcmp(temp.value.str_val, "0") != 0) {
-                    z->value.bool_val = 1;
-                } else {
-                    z->value.bool_val = 0;
-                }
-                break;
-            case PHP_TYPE_ARRAY:
-            case PHP_TYPE_OBJECT:
+        if (old_type == PHP_TYPE_NULL) {
+            z->value.bool_val = 0;
+        } else if (old_type == PHP_TYPE_BOOL) {
+            z->value.bool_val = old_bool;
+        } else if (old_type == PHP_TYPE_INT) {
+            z->value.bool_val = (old_int != 0);
+        } else if (old_type == PHP_TYPE_STRING) {
+            if (old_str != NULL && strlen(old_str) > 0 && strcmp(old_str, "0") != 0) {
                 z->value.bool_val = 1;
-                break;
+            } else {
+                z->value.bool_val = 0;
+            }
+            free(old_str);
+        } else if (old_type == PHP_TYPE_ARRAY || old_type == PHP_TYPE_OBJECT) {
+            z->value.bool_val = 1;
+        } else {
+            z->value.bool_val = 0;
         }
     } else if (strcmp(type, "string") == 0) {
         z->type = PHP_TYPE_STRING;
         z->refcount = 1;
-        char* str = php_zval_to_string(&temp);
-        z->value.str_val = strdup(str);
+        if (old_type == PHP_TYPE_STRING && old_str != NULL) {
+            z->value.str_val = old_str;  // Already duplicated above
+        } else if (old_type == PHP_TYPE_INT) {
+            char buf[32];
+            sprintf(buf, "%d", old_int);
+            z->value.str_val = strdup(buf);
+        } else if (old_type == PHP_TYPE_BOOL) {
+            z->value.str_val = strdup(old_bool ? "1" : "");
+        } else if (old_type == PHP_TYPE_NULL) {
+            z->value.str_val = strdup("");
+        } else {
+            z->value.str_val = strdup("");
+        }
     } else if (strcmp(type, "NULL") == 0 || strcmp(type, "null") == 0) {
         z->type = PHP_TYPE_NULL;
         z->refcount = 1;
+        if (old_str != NULL) free(old_str);
     } else {
-        // Unknown type - restore original value
-        *z = temp;
-        php_zval_copy(z);  // Increment refcount since we'll decrement at end
-        php_zval_destroy(&temp);
+        // Unknown type - fail
+        if (old_str != NULL) free(old_str);
         return 0;  // Failure
     }
 
-    php_zval_destroy(&temp);
     return 1;  // Success
 }
