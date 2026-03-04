@@ -118,6 +118,7 @@ class Generator
         $ir[] = "declare void @php_zval_null(%struct.zval*)";
         $ir[] = "declare void @php_zval_bool(%struct.zval*, i32)";
         $ir[] = "declare void @php_zval_int(%struct.zval*, i32)";
+        $ir[] = "declare void @php_zval_double(%struct.zval*, double)";
         $ir[] = "declare void @php_zval_string(%struct.zval*, i8*)";
         $ir[] = "declare void @php_zval_string_literal(%struct.zval*, i8*)";
         $ir[] = "declare i8* @php_zval_to_string(%struct.zval*)";
@@ -2337,7 +2338,6 @@ class Generator
             case '+':
             case '-':
             case '*':
-            case '/':
                 // Convert both operands to integers
                 $leftInt = $this->getNextTempVariable();
                 $rightInt = $this->getNextTempVariable();
@@ -2356,12 +2356,28 @@ class Generator
                     case '*':
                         $ir[] = "  {$intResult} = mul i32 {$leftInt}, {$rightInt}";
                         break;
-                    case '/':
-                        $ir[] = "  {$intResult} = sdiv i32 {$leftInt}, {$rightInt}"; // signed division
-                        break;
                 }
 
                 $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 {$intResult})";
+                break;
+
+            case '/':
+                // Division produces a double (floating-point)
+                $leftInt = $this->getNextTempVariable();
+                $rightInt = $this->getNextTempVariable();
+                $ir[] = "  {$leftInt} = call i32 @php_zval_to_int(%struct.zval* {$leftZval})";
+                $ir[] = "  {$rightInt} = call i32 @php_zval_to_int(%struct.zval* {$rightZval})";
+
+                // Convert to double for floating-point division
+                $leftDouble = $this->getNextTempVariable();
+                $rightDouble = $this->getNextTempVariable();
+                $ir[] = "  {$leftDouble} = sitofp i32 {$leftInt} to double";
+                $ir[] = "  {$rightDouble} = sitofp i32 {$rightInt} to double";
+
+                $doubleResult = $this->getNextTempVariable();
+                $ir[] = "  {$doubleResult} = fdiv double {$leftDouble}, {$rightDouble}";
+
+                $ir[] = "  call void @php_zval_double(%struct.zval* {$result}, double {$doubleResult})";
                 break;
             case '.':
                 // String concatenation - convert both to strings

@@ -83,6 +83,12 @@ void php_zval_int(zval* z, int int_val) {
     z->value.int_val = int_val;
 }
 
+void php_zval_double(zval* z, double double_val) {
+    z->type = PHP_TYPE_DOUBLE;
+    z->refcount = 1;
+    z->value.double_val = double_val;
+}
+
 void php_zval_string(zval* z, const char* str) {
     z->type = PHP_TYPE_STRING;
     z->refcount = 1;
@@ -157,6 +163,7 @@ void php_zval_destroy(zval* z) {
         case PHP_TYPE_NULL:
         case PHP_TYPE_BOOL:
         case PHP_TYPE_INT:
+        case PHP_TYPE_DOUBLE:
             // These types don't allocate heap memory
             break;
     }
@@ -178,6 +185,9 @@ char* php_zval_to_string(const zval* z) {
     switch (z->type) {
         case PHP_TYPE_NULL:
             return "";  // PHP: null converts to empty string in concatenation
+        case PHP_TYPE_DOUBLE:
+            sprintf(buffer, "%.14g", z->value.double_val);
+            return buffer;
         case PHP_TYPE_BOOL:
             return z->value.bool_val ? "1" : "";
         case PHP_TYPE_INT:
@@ -198,6 +208,8 @@ int php_zval_to_int(const zval* z) {
             return z->value.bool_val;
         case PHP_TYPE_INT:
             return z->value.int_val;
+        case PHP_TYPE_DOUBLE:
+            return (int)z->value.double_val;
         case PHP_TYPE_STRING:
             if (z->value.str_val == NULL) {
                 return 0;
@@ -773,6 +785,13 @@ void php_print_r(zval* value, zval* result) {
                 php_echo(buf);
             }
             break;
+        case PHP_TYPE_DOUBLE:
+            {
+                char buf[64];
+                sprintf(buf, "%.14g\n", value->value.double_val);
+                php_echo(buf);
+            }
+            break;
         case PHP_TYPE_STRING:
             if (value->value.str_val) {
                 php_echo(value->value.str_val);
@@ -830,6 +849,14 @@ static void var_dump_recursive(zval* value, int depth) {
             {
                 char buf[32];
                 sprintf(buf, "int(%d)\n", value->value.int_val);
+                php_echo(buf);
+            }
+            break;
+
+        case PHP_TYPE_DOUBLE:
+            {
+                char buf[64];
+                sprintf(buf, "float(%.14g)\n", value->value.double_val);
                 php_echo(buf);
             }
             break;
@@ -1520,6 +1547,8 @@ int php_empty(zval* z) {
             return z->value.bool_val == 0;  // false is empty
         case PHP_TYPE_INT:
             return z->value.int_val == 0;  // 0 is empty
+        case PHP_TYPE_DOUBLE:
+            return z->value.double_val == 0.0;  // 0.0 is empty
         case PHP_TYPE_STRING:
             if (z->value.str_val == NULL) return 1;  // null string is empty
             return strlen(z->value.str_val) == 0 || strcmp(z->value.str_val, "0") == 0;
@@ -1572,6 +1601,9 @@ void php_gettype(zval* z, zval* result) {
             break;
         case PHP_TYPE_INT:
             php_zval_string(result, "integer");
+            break;
+        case PHP_TYPE_DOUBLE:
+            php_zval_string(result, "double");
             break;
         case PHP_TYPE_STRING:
             php_zval_string(result, "string");

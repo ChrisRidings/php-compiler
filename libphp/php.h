@@ -17,6 +17,7 @@ typedef enum {
     PHP_TYPE_NULL,
     PHP_TYPE_BOOL,
     PHP_TYPE_INT,
+    PHP_TYPE_DOUBLE,
     PHP_TYPE_STRING,
     PHP_TYPE_ARRAY,
     PHP_TYPE_OBJECT
@@ -33,6 +34,7 @@ typedef struct {
     union {
         int bool_val;           // for PHP_TYPE_BOOL
         int int_val;            // for PHP_TYPE_INT
+        double double_val;      // for PHP_TYPE_DOUBLE
         char* str_val;          // for PHP_TYPE_STRING (null-terminated)
         long long ptr_val;      // for PHP_TYPE_ARRAY (stores array pointer)
         struct php_object* obj_val;    // for PHP_TYPE_OBJECT
@@ -67,6 +69,11 @@ void php_zval_bool(zval* z, int bool_val);
  * Creates an integer zval.
  */
 void php_zval_int(zval* z, int int_val);
+
+/**
+ * Initialize a zval with a double value
+ */
+void php_zval_double(zval* z, double double_val);
 
 /**
  * Creates a string zval (raw string, no escape processing).
