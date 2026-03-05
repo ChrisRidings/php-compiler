@@ -149,8 +149,9 @@ class Generator
          $ir[] = "declare void @php_array_fill_keys(%struct.zval*, %struct.zval*, %struct.zval*)";
           $ir[] = "declare void @php_array_merge(%struct.zval*, %struct.zval*, %struct.zval*)";
           $ir[] = "declare void @php_array_merge_recursive(%struct.zval*, %struct.zval*, %struct.zval*)";
-          $ir[] = "declare void @php_array_replace(%struct.zval*, %struct.zval*, %struct.zval*)";
-          $ir[] = "declare void @php_array_pad(%struct.zval*, i32, %struct.zval*, %struct.zval*)";
+           $ir[] = "declare void @php_array_replace(%struct.zval*, %struct.zval*, %struct.zval*)";
+           $ir[] = "declare void @php_array_replace_recursive(%struct.zval*, %struct.zval*, %struct.zval*)";
+           $ir[] = "declare void @php_array_pad(%struct.zval*, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_array_push(%struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_array_unshift(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_pop(%struct.zval*, %struct.zval*)";
@@ -161,9 +162,10 @@ class Generator
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_preg_match(%struct.zval*, %struct.zval*, %struct.zval*)";
-        $ir[] = "declare void @php_natsort(%struct.zval*, %struct.zval*)";
-        $ir[] = "declare void @php_print_r(%struct.zval*, %struct.zval*)";
-        $ir[] = "declare void @php_zval_strict_ne(%struct.zval*, %struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_natsort(%struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_print_r(%struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_var_dump(%struct.zval*)";
+         $ir[] = "declare void @php_zval_strict_ne(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_zval_strict_eq(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_str_repeat(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_trim(%struct.zval*, %struct.zval*)";
@@ -1100,6 +1102,9 @@ class Generator
         } elseif ($funcCall->name === 'array_replace') {
             $this->generateArrayReplaceFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_replace_recursive') {
+            $this->generateArrayReplaceRecursiveFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'array_pad') {
             $this->generateArrayPadFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1396,6 +1401,27 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateArrayReplaceRecursiveFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_replace_recursive() expects at least 2 arguments");
+        }
+
+        // Generate the first array argument (base array)
+        $arr1Ptr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the second array argument (replacement array)
+        $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_replace_recursive function
+        $ir[] = "  call void @php_array_replace_recursive(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
     private function generateArrayReplaceExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) < 2) {
@@ -1414,6 +1440,28 @@ class Generator
 
         // Call php_array_replace function
         $ir[] = "  call void @php_array_replace(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
+    private function generateArrayReplaceRecursiveExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_replace_recursive() expects at least 2 arguments");
+        }
+
+        // Generate the first array argument (base array)
+        $arr1Ptr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the second array argument (replacement array)
+        $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_replace_recursive function
+        $ir[] = "  call void @php_array_replace_recursive(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
 
         return $resultPtr;
     }
@@ -3052,6 +3100,8 @@ class Generator
                 return $this->generateArrayMergeRecursiveExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_replace') {
                 return $this->generateArrayReplaceExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_replace_recursive') {
+                return $this->generateArrayReplaceRecursiveExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_pad') {
                 return $this->generateArrayPadExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_push') {
