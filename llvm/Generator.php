@@ -147,9 +147,10 @@ class Generator
          $ir[] = "declare void @php_array_combine(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_fill(i32, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_fill_keys(%struct.zval*, %struct.zval*, %struct.zval*)";
-         $ir[] = "declare void @php_array_merge(%struct.zval*, %struct.zval*, %struct.zval*)";
-         $ir[] = "declare void @php_array_merge_recursive(%struct.zval*, %struct.zval*, %struct.zval*)";
-         $ir[] = "declare void @php_array_pad(%struct.zval*, i32, %struct.zval*, %struct.zval*)";
+          $ir[] = "declare void @php_array_merge(%struct.zval*, %struct.zval*, %struct.zval*)";
+          $ir[] = "declare void @php_array_merge_recursive(%struct.zval*, %struct.zval*, %struct.zval*)";
+          $ir[] = "declare void @php_array_replace(%struct.zval*, %struct.zval*, %struct.zval*)";
+          $ir[] = "declare void @php_array_pad(%struct.zval*, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_array_push(%struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_array_unshift(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_pop(%struct.zval*, %struct.zval*)";
@@ -1096,6 +1097,9 @@ class Generator
         } elseif ($funcCall->name === 'array_merge_recursive') {
             $this->generateArrayMergeRecursiveFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_replace') {
+            $this->generateArrayReplaceFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'array_pad') {
             $this->generateArrayPadFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1369,6 +1373,49 @@ class Generator
         // Call php_array_merge_recursive function
         $ir[] = "  call void @php_array_merge_recursive(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
         $ir[] = "";
+    }
+
+    private function generateArrayReplaceFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_replace() expects at least 2 arguments");
+        }
+
+        // Generate the first array argument (base array)
+        $arr1Ptr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the second array argument (replacement array)
+        $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_replace function
+        $ir[] = "  call void @php_array_replace(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayReplaceExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_replace() expects at least 2 arguments");
+        }
+
+        // Generate the first array argument (base array)
+        $arr1Ptr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the second array argument (replacement array)
+        $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_replace function
+        $ir[] = "  call void @php_array_replace(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
     }
 
     private function generateArrayPadFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
@@ -3003,6 +3050,8 @@ class Generator
                 return $this->generateArrayMergeExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_merge_recursive') {
                 return $this->generateArrayMergeRecursiveExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_replace') {
+                return $this->generateArrayReplaceExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_pad') {
                 return $this->generateArrayPadExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_push') {

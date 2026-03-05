@@ -109,3 +109,11 @@ array_shift($stack);
 echo "16. array_shift(): ";
 print_r($stack);
 echo "<br><br>";
+
+// 17. array_replace(): Replaces elements with those from other arrays
+$base = ["a" => "Apple", "b" => "Banana"];
+$replace = ["b" => "Berry", "c" => "Cherry"];
+$replaced = array_replace($base, $replace);
+echo "17. array_replace(): ";
+print_r($replaced);
+echo "<br><br>";

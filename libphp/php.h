@@ -299,6 +299,13 @@ void php_array_pop(zval* arr, zval* result);
 void php_array_shift(zval* arr, zval* result);
 
 /**
+ * Replaces elements from the first array with elements from the second array.
+ * Keys in the replacement array overwrite matching keys in the base array.
+ * Returns a new array with replaced elements.
+ */
+void php_array_replace(zval* base, zval* replacement, zval* result);
+
+/**
  * Extract a slice of an array.
  *
  * @param arr Source array

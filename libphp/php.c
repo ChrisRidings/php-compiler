@@ -1123,6 +1123,97 @@ void php_array_shift(zval* arr, zval* result) {
     array->size--;
 }
 
+// array_replace implementation
+// Replaces elements from the first array with elements from the second array
+// Keys in the replacement array overwrite matching keys in the base array
+// Keys that don't exist in the base array are appended
+void php_array_replace(zval* base, zval* replacement, zval* result) {
+    if (base->type != PHP_TYPE_ARRAY || replacement->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* base_arr = (php_array*)((long long)base->value.ptr_val);
+    php_array* repl_arr = (php_array*)((long long)replacement->value.ptr_val);
+    if (!base_arr || !repl_arr) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Create result array - start with a copy of base array
+    php_array_create(result, base_arr->size + repl_arr->size);
+    php_array* result_arr = (php_array*)((long long)result->value.ptr_val);
+
+    // Copy all elements from base array
+    for (int i = 0; i < base_arr->size; i++) {
+        php_array_element new_elem;
+        new_elem.value = base_arr->elements[i].value;
+        if (base_arr->elements[i].key != NULL) {
+            new_elem.key = strdup(base_arr->elements[i].key);
+        } else {
+            new_elem.key = NULL;
+        }
+        // Duplicate string values
+        if (base_arr->elements[i].value.type == PHP_TYPE_STRING &&
+            base_arr->elements[i].value.value.str_val != NULL) {
+            new_elem.value.value.str_val = strdup(base_arr->elements[i].value.value.str_val);
+        }
+        result_arr->elements[result_arr->size++] = new_elem;
+    }
+
+    // Process replacement array - overwrite matching keys or append new ones
+    for (int i = 0; i < repl_arr->size; i++) {
+        int replaced = 0;
+        char* repl_key = repl_arr->elements[i].key;
+
+        // Try to find a matching key in the result array
+        for (int j = 0; j < result_arr->size; j++) {
+            char* result_key = result_arr->elements[j].key;
+
+            // Check if keys match
+            int keys_match = 0;
+            if (repl_key == NULL && result_key == NULL) {
+                // Both numeric - match by position (i == j for numeric keys)
+                // For numeric indices, we need to check if this is the same position
+                keys_match = (i == j);
+            } else if (repl_key != NULL && result_key != NULL) {
+                // Both string keys - compare
+                keys_match = (strcmp(repl_key, result_key) == 0);
+            }
+            // One NULL and one not NULL = no match
+
+            if (keys_match) {
+                // Replace the value
+                result_arr->elements[j].value = repl_arr->elements[i].value;
+                // Duplicate string values
+                if (repl_arr->elements[i].value.type == PHP_TYPE_STRING &&
+                    repl_arr->elements[i].value.value.str_val != NULL) {
+                    result_arr->elements[j].value.value.str_val = strdup(repl_arr->elements[i].value.value.str_val);
+                }
+                replaced = 1;
+                break;
+            }
+        }
+
+        // If not replaced (key doesn't exist), append the element
+        if (!replaced) {
+            php_array_element new_elem;
+            new_elem.value = repl_arr->elements[i].value;
+            if (repl_key != NULL) {
+                new_elem.key = strdup(repl_key);
+            } else {
+                new_elem.key = NULL;
+            }
+            // Duplicate string values
+            if (repl_arr->elements[i].value.type == PHP_TYPE_STRING &&
+                repl_arr->elements[i].value.value.str_val != NULL) {
+                new_elem.value.value.str_val = strdup(repl_arr->elements[i].value.value.str_val);
+            }
+            result_arr->elements[result_arr->size++] = new_elem;
+        }
+    }
+}
+
 // array_slice implementation
 // Extracts a portion of an array
 // offset: starting position (negative values count from end)
