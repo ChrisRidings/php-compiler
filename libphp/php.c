@@ -933,6 +933,68 @@ void php_array_merge_recursive(zval* arr1, zval* arr2, zval* result) {
     }
 }
 
+// array_pad implementation
+// Pads an array to a specified length with a value
+// If size is positive, pads at the end; if negative, pads at the beginning
+void php_array_pad(zval* arr, int size, zval* pad_value, zval* result) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Calculate the target size
+    int target_size = size;
+    int current_size = array->size;
+
+    // If size is negative, treat as positive for calculation
+    if (target_size < 0) {
+        target_size = -target_size;
+    }
+
+    // If array is already large enough, return a copy
+    if (current_size >= target_size) {
+        php_array_create(result, current_size);
+        for (int i = 0; i < array->size; i++) {
+            php_array_append(result, &array->elements[i].value);
+        }
+        return;
+    }
+
+    // Calculate number of pad elements needed
+    int pad_count = target_size - current_size;
+
+    // Create result array with target size
+    php_array_create(result, target_size);
+
+    if (size < 0) {
+        // Pad at the beginning (negative size)
+        // First add pad values
+        for (int i = 0; i < pad_count; i++) {
+            php_array_append(result, pad_value);
+        }
+        // Then add original array elements
+        for (int i = 0; i < array->size; i++) {
+            php_array_append(result, &array->elements[i].value);
+        }
+    } else {
+        // Pad at the end (positive size)
+        // First add original array elements
+        for (int i = 0; i < array->size; i++) {
+            php_array_append(result, &array->elements[i].value);
+        }
+        // Then add pad values
+        for (int i = 0; i < pad_count; i++) {
+            php_array_append(result, pad_value);
+        }
+    }
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>

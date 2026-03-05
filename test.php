@@ -65,3 +65,9 @@ $recursiveMerge = array_merge_recursive($array1, $array2);
 echo "9. array_merge_recursive(): ";
 print_r($recursiveMerge);
 echo "<br><br>";
+
+// 10. array_pad(): Pads an array to a specified length with a value
+$paddedArray = array_pad([1, 2], 5, 0);
+echo "10. array_pad(): ";
+print_r($paddedArray);
+echo "<br><br>";

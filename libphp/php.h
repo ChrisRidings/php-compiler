@@ -271,6 +271,11 @@ void php_array_merge(zval* arr1, zval* arr2, zval* result);
 void php_array_merge_recursive(zval* arr1, zval* arr2, zval* result);
 
 /**
+ * Pads an array to a specified length with a value.
+ */
+void php_array_pad(zval* arr, int size, zval* pad_value, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path
