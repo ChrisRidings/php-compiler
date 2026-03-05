@@ -1802,10 +1802,11 @@ static void print_r_recursive(zval* value, int depth) {
                 php_array* arr = (php_array*)((long long)value->value.ptr_val);
                 if (arr) {
                     php_echo("Array\n");
-                    print_r_indent(depth);
+                    print_r_indent(depth > 0 ? depth + 1 : depth);
                     php_echo("(\n");
                     for (int i = 0; i < arr->size; i++) {
-                        print_r_indent(depth + 1);
+                        // Elements inside nested arrays need extra indentation
+                        print_r_indent(depth > 0 ? depth + 2 : depth + 1);
                         php_echo("[");
                         if (arr->elements[i].key) {
                             php_echo(arr->elements[i].key);
@@ -1816,15 +1817,16 @@ static void print_r_recursive(zval* value, int depth) {
                         }
                         php_echo("] => ");
 
-                        // For nested arrays, add newline and increase depth
+                        // For nested arrays, print on same line then newline for parenthesis
                         if (arr->elements[i].value.type == PHP_TYPE_ARRAY) {
                             print_r_recursive(&arr->elements[i].value, depth + 1);
+                            // PHP adds a blank line after each nested array element
+                            php_echo("\n");
                         } else {
-                            zval elem_result;
                             print_r_recursive(&arr->elements[i].value, depth + 1);
                         }
                     }
-                    print_r_indent(depth);
+                    print_r_indent(depth > 0 ? depth + 1 : depth);
                     php_echo(")\n");
                 }
             }
