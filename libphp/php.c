@@ -781,6 +781,43 @@ void php_array_fill(int start_index, int num, zval* value, zval* result) {
     }
 }
 
+// array_fill_keys implementation
+// Creates an array using specified keys and a value for all keys
+void php_array_fill_keys(zval* keys, zval* value, zval* result) {
+    if (keys->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* keys_arr = (php_array*)((long long)keys->value.ptr_val);
+    if (!keys_arr) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Create result array with same size as keys array
+    php_array_create(result, keys_arr->size);
+
+    // Iterate through keys and set each to the value
+    for (int i = 0; i < keys_arr->size; i++) {
+        // Get the key value as string
+        char* key_str = NULL;
+        if (keys_arr->elements[i].key != NULL) {
+            // Use the string key if present
+            key_str = strdup(keys_arr->elements[i].key);
+        } else {
+            // Convert the value to string for the key
+            key_str = strdup(php_zval_to_string(&keys_arr->elements[i].value));
+        }
+
+        if (key_str != NULL) {
+            // Set the value with this key
+            php_array_set(result, key_str, value);
+            free(key_str);
+        }
+    }
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>

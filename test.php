@@ -42,3 +42,10 @@ $filledArray = array_fill(0, 5, "Hello");
 echo "6. array_fill(): ";
 print_r($filledArray);
 echo "<br><br>";
+
+// 7. array_fill_keys(): Fills an array with specified keys
+$keys = ["a", "b", "c"];
+$fillKeys = array_fill_keys($keys, "value");
+echo "7. array_fill_keys(): ";
+print_r($fillKeys);
+echo "<br><br>";

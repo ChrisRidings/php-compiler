@@ -256,6 +256,11 @@ void php_array_combine(zval* keys, zval* values, zval* result);
 void php_array_fill(int start_index, int num, zval* value, zval* result);
 
 /**
+ * Fills an array with values, using specified keys.
+ */
+void php_array_fill_keys(zval* keys, zval* value, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path

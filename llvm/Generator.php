@@ -146,6 +146,7 @@ class Generator
          $ir[] = "declare void @php_array_column(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_combine(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_fill(i32, i32, %struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_array_fill_keys(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
@@ -1077,6 +1078,9 @@ class Generator
         } elseif ($funcCall->name === 'array_fill') {
             $this->generateArrayFillFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_fill_keys') {
+            $this->generateArrayFillKeysFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1264,6 +1268,27 @@ class Generator
 
         // Call php_array_fill function
         $ir[] = "  call void @php_array_fill(i32 {$startIndexInt}, i32 {$numInt}, %struct.zval* {$valuePtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayFillKeysFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("array_fill_keys() expects exactly 2 arguments");
+        }
+
+        // Generate the keys array argument
+        $keysPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the value argument
+        $valuePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_fill_keys function
+        $ir[] = "  call void @php_array_fill_keys(%struct.zval* {$keysPtr}, %struct.zval* {$valuePtr}, %struct.zval* {$resultPtr})";
         $ir[] = "";
     }
 
@@ -1877,6 +1902,28 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArrayFillKeysExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("array_fill_keys() expects exactly 2 arguments");
+        }
+
+        // Generate the keys array argument
+        $keysPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the value argument
+        $valuePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_fill_keys function
+        $ir[] = "  call void @php_array_fill_keys(%struct.zval* {$keysPtr}, %struct.zval* {$valuePtr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
     private function generateOpendirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -2384,6 +2431,8 @@ class Generator
                 return $this->generateArrayCombineExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_fill') {
                 return $this->generateArrayFillExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_fill_keys') {
+                return $this->generateArrayFillKeysExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'opendir') {
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {
