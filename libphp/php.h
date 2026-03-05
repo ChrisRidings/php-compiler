@@ -287,6 +287,17 @@ int php_array_push(zval* arr, zval* value);
 void php_array_pop(zval* arr, zval* result);
 
 /**
+ * Extract a slice of an array.
+ *
+ * @param arr Source array
+ * @param offset Starting position (negative values count from end)
+ * @param length Number of elements to extract (0 = all remaining)
+ * @param preserve_keys 0 = reindex numeric keys, 1 = preserve original keys
+ * @param result Output parameter for the resulting array slice
+ */
+void php_array_slice(zval* arr, int offset, int length, int preserve_keys, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path

@@ -1044,6 +1044,61 @@ void php_array_pop(zval* arr, zval* result) {
     array->size--;
 }
 
+// array_slice implementation
+// Extracts a portion of an array
+// offset: starting position (negative values count from end)
+// length: number of elements to extract (0 or negative means all remaining)
+// preserve_keys: 0 = reindex numeric keys, 1 = preserve original keys
+void php_array_slice(zval* arr, int offset, int length, int preserve_keys, zval* result) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Handle negative offset (count from end)
+    int actual_offset = offset;
+    if (actual_offset < 0) {
+        actual_offset = array->size + actual_offset;
+        if (actual_offset < 0) {
+            actual_offset = 0;  // Clamp to beginning
+        }
+    }
+
+    // Clamp offset to array size
+    if (actual_offset > array->size) {
+        actual_offset = array->size;
+    }
+
+    // Calculate actual length
+    int actual_length = array->size - actual_offset;
+    if (length > 0 && length < actual_length) {
+        actual_length = length;
+    }
+
+    // Create result array
+    php_array_create(result, actual_length);
+    php_array* result_array = (php_array*)((long long)result->value.ptr_val);
+
+    // Copy elements to result
+    int index = 0;
+    for (int i = actual_offset; i < actual_offset + actual_length && i < array->size; i++) {
+        if (preserve_keys && array->elements[i].key != NULL) {
+            // Preserve string key
+            php_array_set(result, array->elements[i].key, &array->elements[i].value);
+        } else {
+            // Add with numeric index
+            php_array_append(result, &array->elements[i].value);
+        }
+        index++;
+    }
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>

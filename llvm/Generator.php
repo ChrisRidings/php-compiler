@@ -152,6 +152,7 @@ class Generator
          $ir[] = "declare void @php_array_pad(%struct.zval*, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_array_push(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_pop(%struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_array_slice(%struct.zval*, i32, i32, i32, %struct.zval*)";
          $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
@@ -1101,6 +1102,9 @@ class Generator
         } elseif ($funcCall->name === 'array_pop') {
             $this->generateArrayPopFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_slice') {
+            $this->generateArraySliceFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1423,6 +1427,53 @@ class Generator
         $resultPtr = $this->getNextTempVariable();
         $ir[] = "  {$resultPtr} = alloca %struct.zval";
         $ir[] = "  call void @php_array_pop(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArraySliceFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 2 || count($funcCall->arguments) > 4) {
+            throw new \RuntimeException("array_slice() expects 2 to 4 arguments");
+        }
+
+        // Generate the array argument
+        $arrPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the offset argument
+        $offsetPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $offsetInt = $this->getNextTempVariable();
+        $ir[] = "  {$offsetInt} = call i32 @php_zval_to_int(%struct.zval* {$offsetPtr})";
+
+        // Get length (default 0 = all remaining)
+        $lengthInt = 0;
+        if (count($funcCall->arguments) > 2) {
+            $lengthPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+            $lengthInt = $this->getNextTempVariable();
+            $ir[] = "  {$lengthInt} = call i32 @php_zval_to_int(%struct.zval* {$lengthPtr})";
+        }
+
+        // Get preserve_keys flag (default to 0/false)
+        $preserveKeys = 0;
+        if (count($funcCall->arguments) > 3) {
+            $preserveKeysPtr = $this->generateExpression($funcCall->arguments[3], $ir, $globalVars);
+            $preserveKeysInt = $this->getNextTempVariable();
+            $ir[] = "  {$preserveKeysInt} = call i32 @php_zval_to_int(%struct.zval* {$preserveKeysPtr})";
+            $preserveKeys = $preserveKeysInt;
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_slice
+        if (is_int($lengthInt) && $lengthInt === 0 && is_int($preserveKeys) && $preserveKeys === 0) {
+            // Simple case: only 2 arguments
+            $ir[] = "  call void @php_array_slice(%struct.zval* {$arrPtr}, i32 {$offsetInt}, i32 0, i32 0, %struct.zval* {$resultPtr})";
+        } else if (count($funcCall->arguments) > 3) {
+            $ir[] = "  call void @php_array_slice(%struct.zval* {$arrPtr}, i32 {$offsetInt}, i32 {$lengthInt}, i32 {$preserveKeys}, %struct.zval* {$resultPtr})";
+        } else {
+            $ir[] = "  call void @php_array_slice(%struct.zval* {$arrPtr}, i32 {$offsetInt}, i32 {$lengthInt}, i32 0, %struct.zval* {$resultPtr})";
+        }
         $ir[] = "";
     }
 
@@ -2185,6 +2236,53 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArraySliceExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 2 || count($funcCall->arguments) > 4) {
+            throw new \RuntimeException("array_slice() expects 2 to 4 arguments");
+        }
+
+        // Generate the array argument
+        $arrPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the offset argument
+        $offsetPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $offsetInt = $this->getNextTempVariable();
+        $ir[] = "  {$offsetInt} = call i32 @php_zval_to_int(%struct.zval* {$offsetPtr})";
+
+        // Get length (default 0 = all remaining)
+        $lengthInt = 0;
+        if (count($funcCall->arguments) > 2) {
+            $lengthPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+            $lengthInt = $this->getNextTempVariable();
+            $ir[] = "  {$lengthInt} = call i32 @php_zval_to_int(%struct.zval* {$lengthPtr})";
+        }
+
+        // Get preserve_keys flag (default to 0/false)
+        $preserveKeys = 0;
+        if (count($funcCall->arguments) > 3) {
+            $preserveKeysPtr = $this->generateExpression($funcCall->arguments[3], $ir, $globalVars);
+            $preserveKeysInt = $this->getNextTempVariable();
+            $ir[] = "  {$preserveKeysInt} = call i32 @php_zval_to_int(%struct.zval* {$preserveKeysPtr})";
+            $preserveKeys = $preserveKeysInt;
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_slice
+        if (count($funcCall->arguments) > 3) {
+            $ir[] = "  call void @php_array_slice(%struct.zval* {$arrPtr}, i32 {$offsetInt}, i32 {$lengthInt}, i32 {$preserveKeys}, %struct.zval* {$resultPtr})";
+        } else if (count($funcCall->arguments) > 2) {
+            $ir[] = "  call void @php_array_slice(%struct.zval* {$arrPtr}, i32 {$offsetInt}, i32 {$lengthInt}, i32 0, %struct.zval* {$resultPtr})";
+        } else {
+            $ir[] = "  call void @php_array_slice(%struct.zval* {$arrPtr}, i32 {$offsetInt}, i32 0, i32 0, %struct.zval* {$resultPtr})";
+        }
+
+        return $resultPtr;
+    }
+
     private function generateOpendirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -2704,6 +2802,8 @@ class Generator
                 return $this->generateArrayPushExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_pop') {
                 return $this->generateArrayPopExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_slice') {
+                return $this->generateArraySliceExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'opendir') {
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {

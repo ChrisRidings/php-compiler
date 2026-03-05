@@ -84,3 +84,9 @@ array_pop($stack);
 echo "12. array_pop(): ";
 print_r($stack);
 echo "<br><br>";
+
+// 13. array_slice(): Extracts a portion of an array
+$sliced = array_slice($stack, 1, 2);
+echo "13. array_slice(): ";
+print_r($sliced);
+echo "<br><br>";
