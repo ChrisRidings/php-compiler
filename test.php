@@ -28,3 +28,11 @@ $names = array_column($students, "name");
 echo "4. array_column(): ";
 print_r($names);
 echo "<br><br>";
+
+// 5. array_combine(): Creates an array with keys and values
+$keys = ["name", "age"];
+$values = ["John", 25];
+$combined = array_combine($keys, $values);
+echo "5. array_combine(): ";
+print_r($combined);
+echo "<br><br>";

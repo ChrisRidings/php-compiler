@@ -687,6 +687,49 @@ void php_array_column(zval* arr, zval* column_key_zval, zval* result) {
     }
 }
 
+// array_combine implementation
+// Creates an array with keys from one array and values from another
+void php_array_combine(zval* keys, zval* values, zval* result) {
+    if (keys->type != PHP_TYPE_ARRAY || values->type != PHP_TYPE_ARRAY) {
+        php_zval_bool(result, 0);  // false - both must be arrays
+        return;
+    }
+
+    php_array* keys_arr = (php_array*)((long long)keys->value.ptr_val);
+    php_array* values_arr = (php_array*)((long long)values->value.ptr_val);
+    if (!keys_arr || !values_arr) {
+        php_zval_bool(result, 0);  // false
+        return;
+    }
+
+    // Check if arrays have the same length
+    if (keys_arr->size != values_arr->size) {
+        php_zval_bool(result, 0);  // false - arrays must have same size
+        return;
+    }
+
+    // Create result array
+    php_array_create(result, keys_arr->size);
+
+    // Combine keys and values
+    for (int i = 0; i < keys_arr->size; i++) {
+        // Get key as string (convert from int if needed)
+        char* key_str = NULL;
+        if (keys_arr->elements[i].key != NULL) {
+            key_str = strdup(keys_arr->elements[i].key);
+        } else {
+            // Numeric index - convert to string
+            key_str = strdup(php_zval_to_string(&keys_arr->elements[i].value));
+        }
+
+        if (key_str != NULL) {
+            // Set the value with the key
+            php_array_set(result, key_str, &values_arr->elements[i].value);
+            free(key_str);
+        }
+    }
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>

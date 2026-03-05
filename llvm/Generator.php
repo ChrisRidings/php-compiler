@@ -144,6 +144,7 @@ class Generator
          $ir[] = "declare void @php_array_change_key_case(%struct.zval*, i32, %struct.zval*)";
          $ir[] = "declare void @php_array_chunk(%struct.zval*, i32, i32, %struct.zval*)";
          $ir[] = "declare void @php_array_column(%struct.zval*, %struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_array_combine(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
@@ -1069,6 +1070,9 @@ class Generator
         } elseif ($funcCall->name === 'array_column') {
             $this->generateArrayColumnFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_combine') {
+            $this->generateArrayCombineFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1207,6 +1211,27 @@ class Generator
 
         // Call php_array_column function
         $ir[] = "  call void @php_array_column(%struct.zval* {$argPtr}, %struct.zval* {$columnKeyPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayCombineFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("array_combine() expects exactly 2 arguments");
+        }
+
+        // Generate the keys array argument
+        $keysPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the values array argument
+        $valuesPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_combine function
+        $ir[] = "  call void @php_array_combine(%struct.zval* {$keysPtr}, %struct.zval* {$valuesPtr}, %struct.zval* {$resultPtr})";
         $ir[] = "";
     }
 
@@ -1769,6 +1794,28 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArrayCombineExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 2) {
+            throw new \RuntimeException("array_combine() expects exactly 2 arguments");
+        }
+
+        // Generate the keys array argument
+        $keysPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the values array argument
+        $valuesPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_combine function
+        $ir[] = "  call void @php_array_combine(%struct.zval* {$keysPtr}, %struct.zval* {$valuesPtr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
     private function generateOpendirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -2272,6 +2319,8 @@ class Generator
                 return $this->generateArrayChunkExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_column') {
                 return $this->generateArrayColumnExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_combine') {
+                return $this->generateArrayCombineExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'opendir') {
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {

@@ -246,6 +246,11 @@ void php_array_chunk(zval* arr, int size, int preserve_keys, zval* result);
 void php_array_column(zval* arr, zval* column_key_zval, zval* result);
 
 /**
+ * Combines two arrays into one - one for keys, one for values.
+ */
+void php_array_combine(zval* keys, zval* values, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path
