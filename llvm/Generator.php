@@ -137,10 +137,11 @@ class Generator
         $ir[] = "declare void @php_array_append(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_array_get(%struct.zval*, %struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_array_set(%struct.zval*, i8*, %struct.zval*)";
-        $ir[] = "declare void @php_array_set_by_index(%struct.zval*, i32, %struct.zval*)";
-        $ir[] = "declare i32 @php_array_size(%struct.zval*)";
-        $ir[] = "declare i8* @php_array_get_key(%struct.zval*, i32)";
-        $ir[] = "declare void @php_array_values(%struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_array_set_by_index(%struct.zval*, i32, %struct.zval*)";
+         $ir[] = "declare i32 @php_array_size(%struct.zval*)";
+         $ir[] = "declare i8* @php_array_get_key(%struct.zval*, i32)";
+         $ir[] = "declare void @php_array_values(%struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_array_change_key_case(%struct.zval*, i32, %struct.zval*)";
         $ir[] = "declare void @php_var_dump(%struct.zval*)";
         $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
@@ -1058,6 +1059,9 @@ class Generator
         } elseif ($funcCall->name === 'array_values') {
             $this->generateArrayValuesFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_change_key_case') {
+            $this->generateArrayChangeKeyCaseFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1175,6 +1179,43 @@ class Generator
 
         // Call php_array_values function
         $ir[] = "  call void @php_array_values(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayChangeKeyCaseFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 1 || count($funcCall->arguments) > 2) {
+            throw new \RuntimeException("array_change_key_case() expects 1 or 2 arguments");
+        }
+
+        // Generate the array argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Get the case type (default to CASE_LOWER = 0)
+        $caseType = 0;  // CASE_LOWER
+        if (count($funcCall->arguments) > 1) {
+            // If second argument is a constant like CASE_LOWER or CASE_UPPER
+            $secondArg = $funcCall->arguments[1];
+            if ($secondArg instanceof Constant) {
+                $constName = strtoupper($secondArg->name);
+                if ($constName === 'CASE_UPPER') {
+                    $caseType = 1;
+                } else {
+                    $caseType = 0;  // CASE_LOWER or any other value
+                }
+            } else {
+                // For other expressions, try to evaluate as int
+                // For now, default to CASE_LOWER
+                $caseType = 0;
+            }
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_change_key_case function
+        $ir[] = "  call void @php_array_change_key_case(%struct.zval* {$argPtr}, i32 {$caseType}, %struct.zval* {$resultPtr})";
         $ir[] = "";
     }
 
@@ -1563,6 +1604,44 @@ class Generator
 
         // Call php_array_values function
         $ir[] = "  call void @php_array_values(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
+    private function generateArrayChangeKeyCaseExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 1 || count($funcCall->arguments) > 2) {
+            throw new \RuntimeException("array_change_key_case() expects 1 or 2 arguments");
+        }
+
+        // Generate the array argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Get the case type (default to CASE_LOWER = 0)
+        $caseType = 0;  // CASE_LOWER
+        if (count($funcCall->arguments) > 1) {
+            // If second argument is a constant like CASE_LOWER or CASE_UPPER
+            $secondArg = $funcCall->arguments[1];
+            if ($secondArg instanceof Constant) {
+                $constName = strtoupper($secondArg->name);
+                if ($constName === 'CASE_UPPER') {
+                    $caseType = 1;
+                } else {
+                    $caseType = 0;  // CASE_LOWER or any other value
+                }
+            } else {
+                // For other expressions, try to evaluate as int
+                // For now, default to CASE_LOWER
+                $caseType = 0;
+            }
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_change_key_case function
+        $ir[] = "  call void @php_array_change_key_case(%struct.zval* {$argPtr}, i32 {$caseType}, %struct.zval* {$resultPtr})";
 
         return $resultPtr;
     }
@@ -2064,7 +2143,8 @@ class Generator
                 return $this->generateCountExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_values') {
                 return $this->generateArrayValuesExpression($expression, $ir, $globalVars);
-            } elseif ($expression->name === 'opendir') {
+            } elseif ($expression->name === 'array_change_key_case') {
+                return $this->generateArrayChangeKeyCaseExpression($expression, $ir, $globalVars);
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {
                 return $this->generateReaddirExpression($expression, $ir, $globalVars);
@@ -2293,6 +2373,8 @@ class Generator
         // Define known constants
         $constantValues = [
             'PATHINFO_FILENAME' => 8,  // PHP's PATHINFO_FILENAME constant value
+            'CASE_LOWER' => 0,         // PHP's CASE_LOWER constant value
+            'CASE_UPPER' => 1,         // PHP's CASE_UPPER constant value
         ];
 
         // Check for null constant

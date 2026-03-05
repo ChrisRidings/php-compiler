@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "php.h"
 
@@ -500,6 +501,76 @@ void php_array_values(zval* arr, zval* result) {
     // Copy values with numeric indices
     for (int i = 0; i < array->size; i++) {
         php_array_append(result, &array->elements[i].value);
+    }
+}
+
+// Helper to convert string to lowercase
+static void str_to_lower(char* str) {
+    for (int i = 0; str[i]; i++) {
+        str[i] = tolower((unsigned char)str[i]);
+    }
+}
+
+// Helper to convert string to uppercase
+static void str_to_upper(char* str) {
+    for (int i = 0; str[i]; i++) {
+        str[i] = toupper((unsigned char)str[i]);
+    }
+}
+
+// array_change_key_case implementation
+// case_type: 0 = CASE_LOWER, 1 = CASE_UPPER
+void php_array_change_key_case(zval* arr, int case_type, zval* result) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Create result array
+    php_array_create(result, array->size);
+    php_array* result_array = (php_array*)((long long)result->value.ptr_val);
+
+    // Copy elements with changed keys
+    for (int i = 0; i < array->size; i++) {
+        char* new_key = NULL;
+
+        if (array->elements[i].key != NULL) {
+            // Duplicate the key
+            new_key = strdup(array->elements[i].key);
+            // Convert case
+            if (case_type == 0) {  // CASE_LOWER
+                str_to_lower(new_key);
+            } else {  // CASE_UPPER
+                str_to_upper(new_key);
+            }
+        }
+
+        // Set the value with the new key
+        php_array_element new_elem;
+        new_elem.key = new_key;
+        new_elem.value = array->elements[i].value;
+
+        // Resize if needed
+        if (result_array->size >= result_array->capacity) {
+            int new_capacity = result_array->capacity * 2;
+            php_array_element* new_elements = (php_array_element*)realloc(result_array->elements, sizeof(php_array_element) * new_capacity);
+            if (!new_elements) {
+                free(new_key);
+                continue;
+            }
+            result_array->elements = new_elements;
+            result_array->capacity = new_capacity;
+        }
+
+        // Add element to result array
+        result_array->elements[result_array->size] = new_elem;
+        result_array->size++;
     }
 }
 

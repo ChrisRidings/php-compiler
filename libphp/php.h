@@ -221,6 +221,16 @@ char* php_array_get_key(zval* arr, int index);
 void php_array_values(zval* arr, zval* result);
 
 /**
+ * Changes all keys in an array to lowercase or uppercase.
+ * CASE_LOWER = 0, CASE_UPPER = 1
+ *
+ * @param arr The array zval
+ * @param case_type CASE_LOWER (0) or CASE_UPPER (1)
+ * @param result The result zval (will be the modified array)
+ */
+void php_array_change_key_case(zval* arr, int case_type, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path
