@@ -142,6 +142,7 @@ class Generator
          $ir[] = "declare i8* @php_array_get_key(%struct.zval*, i32)";
          $ir[] = "declare void @php_array_values(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_change_key_case(%struct.zval*, i32, %struct.zval*)";
+         $ir[] = "declare void @php_array_chunk(%struct.zval*, i32, i32, %struct.zval*)";
         $ir[] = "declare void @php_var_dump(%struct.zval*)";
         $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
@@ -1062,6 +1063,9 @@ class Generator
         } elseif ($funcCall->name === 'array_change_key_case') {
             $this->generateArrayChangeKeyCaseFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_chunk') {
+            $this->generateArrayChunkFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1216,6 +1220,42 @@ class Generator
 
         // Call php_array_change_key_case function
         $ir[] = "  call void @php_array_change_key_case(%struct.zval* {$argPtr}, i32 {$caseType}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayChunkFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 2 || count($funcCall->arguments) > 3) {
+            throw new \RuntimeException("array_chunk() expects 2 or 3 arguments");
+        }
+
+        // Generate the array argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Get the chunk size
+        $sizePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $sizeInt = $this->getNextTempVariable();
+        $ir[] = "  {$sizeInt} = call i32 @php_zval_to_int(%struct.zval* {$sizePtr})";
+
+        // Get preserve_keys flag (default to 0/false)
+        $preserveKeys = 0;
+        if (count($funcCall->arguments) > 2) {
+            $preserveKeysPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+            $preserveKeysInt = $this->getNextTempVariable();
+            $ir[] = "  {$preserveKeysInt} = call i32 @php_zval_to_int(%struct.zval* {$preserveKeysPtr})";
+            $preserveKeys = $preserveKeysInt;  // Use the variable name directly
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_chunk function
+        if (count($funcCall->arguments) > 2) {
+            $ir[] = "  call void @php_array_chunk(%struct.zval* {$argPtr}, i32 {$sizeInt}, i32 {$preserveKeys}, %struct.zval* {$resultPtr})";
+        } else {
+            $ir[] = "  call void @php_array_chunk(%struct.zval* {$argPtr}, i32 {$sizeInt}, i32 0, %struct.zval* {$resultPtr})";
+        }
         $ir[] = "";
     }
 
@@ -1642,6 +1682,43 @@ class Generator
 
         // Call php_array_change_key_case function
         $ir[] = "  call void @php_array_change_key_case(%struct.zval* {$argPtr}, i32 {$caseType}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
+    private function generateArrayChunkExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 2 || count($funcCall->arguments) > 3) {
+            throw new \RuntimeException("array_chunk() expects 2 or 3 arguments");
+        }
+
+        // Generate the array argument
+        $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Get the chunk size
+        $sizePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $sizeInt = $this->getNextTempVariable();
+        $ir[] = "  {$sizeInt} = call i32 @php_zval_to_int(%struct.zval* {$sizePtr})";
+
+        // Get preserve_keys flag (default to 0/false)
+        $preserveKeys = 0;
+        if (count($funcCall->arguments) > 2) {
+            $preserveKeysPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+            $preserveKeysInt = $this->getNextTempVariable();
+            $ir[] = "  {$preserveKeysInt} = call i32 @php_zval_to_int(%struct.zval* {$preserveKeysPtr})";
+            $preserveKeys = $preserveKeysInt;  // Use the variable name directly
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_chunk function
+        if (count($funcCall->arguments) > 2) {
+            $ir[] = "  call void @php_array_chunk(%struct.zval* {$argPtr}, i32 {$sizeInt}, i32 {$preserveKeys}, %struct.zval* {$resultPtr})";
+        } else {
+            $ir[] = "  call void @php_array_chunk(%struct.zval* {$argPtr}, i32 {$sizeInt}, i32 0, %struct.zval* {$resultPtr})";
+        }
 
         return $resultPtr;
     }
@@ -2145,6 +2222,9 @@ class Generator
                 return $this->generateArrayValuesExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_change_key_case') {
                 return $this->generateArrayChangeKeyCaseExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_chunk') {
+                return $this->generateArrayChunkExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'opendir') {
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {
                 return $this->generateReaddirExpression($expression, $ir, $globalVars);

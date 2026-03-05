@@ -231,6 +231,16 @@ void php_array_values(zval* arr, zval* result);
 void php_array_change_key_case(zval* arr, int case_type, zval* result);
 
 /**
+ * Splits an array into chunks of a specified size.
+ *
+ * @param arr The array zval to chunk
+ * @param size The size of each chunk (must be positive)
+ * @param preserve_keys Whether to preserve original keys (0 = reindex, 1 = preserve)
+ * @param result The result zval (will be an array of arrays)
+ */
+void php_array_chunk(zval* arr, int size, int preserve_keys, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path

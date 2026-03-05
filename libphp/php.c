@@ -574,6 +574,57 @@ void php_array_change_key_case(zval* arr, int case_type, zval* result) {
     }
 }
 
+// array_chunk implementation
+// Splits an array into chunks of specified size
+// preserve_keys: 0 = reindex each chunk, 1 = preserve original keys
+void php_array_chunk(zval* arr, int size, int preserve_keys, zval* result) {
+    if (arr->type != PHP_TYPE_ARRAY || size <= 0) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Calculate number of chunks
+    int num_chunks = (array->size + size - 1) / size;  // Ceiling division
+
+    // Create result array (array of chunks)
+    php_array_create(result, num_chunks);
+    php_array* result_array = (php_array*)((long long)result->value.ptr_val);
+
+    // Create each chunk
+    for (int chunk_idx = 0; chunk_idx < num_chunks; chunk_idx++) {
+        // Create a new array for this chunk
+        zval chunk_zval;
+        php_array_create(&chunk_zval, size);
+        php_array* chunk = (php_array*)((long long)chunk_zval.value.ptr_val);
+
+        // Add elements to this chunk
+        int start = chunk_idx * size;
+        int end = start + size;
+        if (end > array->size) {
+            end = array->size;
+        }
+
+        for (int i = start; i < end; i++) {
+            if (preserve_keys && array->elements[i].key != NULL) {
+                // Preserve original key
+                php_array_set(&chunk_zval, array->elements[i].key, &array->elements[i].value);
+            } else {
+                // Add with numeric index
+                php_array_append(&chunk_zval, &array->elements[i].value);
+            }
+        }
+
+        // Add this chunk to the result array
+        php_array_append(result, &chunk_zval);
+    }
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>
@@ -840,8 +891,15 @@ void php_natsort(zval* arr, zval* result) {
     *result = *arr;
 }
 
-// Print_r implementation
-void php_print_r(zval* value, zval* result) {
+// Helper to print indentation
+static void print_r_indent(int depth) {
+    for (int i = 0; i < depth; i++) {
+        php_echo("    ");
+    }
+}
+
+// Recursive helper for print_r with depth tracking
+static void print_r_recursive(zval* value, int depth) {
     switch (value->type) {
         case PHP_TYPE_NULL:
             php_echo("\n");
@@ -873,9 +931,12 @@ void php_print_r(zval* value, zval* result) {
             {
                 php_array* arr = (php_array*)((long long)value->value.ptr_val);
                 if (arr) {
-                    php_echo("Array\n(\n");
+                    php_echo("Array\n");
+                    print_r_indent(depth);
+                    php_echo("(\n");
                     for (int i = 0; i < arr->size; i++) {
-                        php_echo("    [");
+                        print_r_indent(depth + 1);
+                        php_echo("[");
                         if (arr->elements[i].key) {
                             php_echo(arr->elements[i].key);
                         } else {
@@ -885,14 +946,25 @@ void php_print_r(zval* value, zval* result) {
                         }
                         php_echo("] => ");
 
-                        zval elem_result;
-                        php_print_r(&arr->elements[i].value, &elem_result);
+                        // For nested arrays, add newline and increase depth
+                        if (arr->elements[i].value.type == PHP_TYPE_ARRAY) {
+                            print_r_recursive(&arr->elements[i].value, depth + 1);
+                        } else {
+                            zval elem_result;
+                            print_r_recursive(&arr->elements[i].value, depth + 1);
+                        }
                     }
+                    print_r_indent(depth);
                     php_echo(")\n");
                 }
             }
             break;
     }
+}
+
+// Print_r implementation
+void php_print_r(zval* value, zval* result) {
+    print_r_recursive(value, 0);
     php_zval_bool(result, 1);  // return true
 }
 
