@@ -1015,6 +1015,35 @@ int php_array_push(zval* arr, zval* value) {
     return array->size;
 }
 
+// array_pop implementation
+// Removes and returns the last element from an array
+// Returns the popped value in the result parameter, or null if array is empty
+void php_array_pop(zval* arr, zval* result) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array || array->size == 0) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Get the last element
+    int last_idx = array->size - 1;
+    *result = array->elements[last_idx].value;
+
+    // If the element has a key, free it (it's being removed from the array)
+    if (array->elements[last_idx].key != NULL) {
+        free(array->elements[last_idx].key);
+        array->elements[last_idx].key = NULL;
+    }
+
+    // Decrease the array size
+    array->size--;
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>

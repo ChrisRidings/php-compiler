@@ -78,3 +78,9 @@ array_push($stack, "Apple", "Date");
 echo "11. array_push(): ";
 print_r($stack);
 echo "<br><br>";
+
+// 12. array_pop(): Removes the last element from an array
+array_pop($stack);
+echo "12. array_pop(): ";
+print_r($stack);
+echo "<br><br>";

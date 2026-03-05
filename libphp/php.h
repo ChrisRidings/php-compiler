@@ -1,4 +1,3 @@
-
 #ifndef LIBPHP_PHP_H
 #define LIBPHP_PHP_H
 
@@ -280,6 +279,12 @@ void php_array_pad(zval* arr, int size, zval* pad_value, zval* result);
  * Returns the new number of elements in the array.
  */
 int php_array_push(zval* arr, zval* value);
+
+/**
+ * Removes and returns the last element from an array.
+ * Returns the popped value, or null if array is empty.
+ */
+void php_array_pop(zval* arr, zval* result);
 
 /**
  * Opens a directory for reading.

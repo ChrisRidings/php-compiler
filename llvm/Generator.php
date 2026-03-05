@@ -151,6 +151,7 @@ class Generator
          $ir[] = "declare void @php_array_merge_recursive(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_pad(%struct.zval*, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_array_push(%struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_array_pop(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
@@ -1097,6 +1098,9 @@ class Generator
         } elseif ($funcCall->name === 'array_push') {
             $this->generateArrayPushFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_pop') {
+            $this->generateArrayPopFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1397,6 +1401,28 @@ class Generator
             $valuePtr = $this->generateExpression($funcCall->arguments[$i], $ir, $globalVars);
             $ir[] = "  call i32 @php_array_push(%struct.zval* {$arrayPtr}, %struct.zval* {$valuePtr})";
         }
+        $ir[] = "";
+    }
+
+    private function generateArrayPopFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("array_pop() expects exactly 1 argument");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_pop() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Pop the last element from the array - allocate result and call function
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_array_pop(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
         $ir[] = "";
     }
 
@@ -2136,6 +2162,29 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArrayPopExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("array_pop() expects exactly 1 argument");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_pop() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Pop the last element from the array
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_array_pop(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
     private function generateOpendirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -2653,6 +2702,8 @@ class Generator
                 return $this->generateArrayPadExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_push') {
                 return $this->generateArrayPushExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_pop') {
+                return $this->generateArrayPopExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'opendir') {
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {
