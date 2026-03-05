@@ -49,3 +49,11 @@ $fillKeys = array_fill_keys($keys, "value");
 echo "7. array_fill_keys(): ";
 print_r($fillKeys);
 echo "<br><br>";
+
+// 8. array_merge(): Merges one or more arrays
+$array1 = [1, 2];
+$array2 = [3, 4];
+$merged = array_merge($array1, $array2);
+echo "8. array_merge(): ";
+print_r($merged);
+echo "<br><br>";

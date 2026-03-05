@@ -261,6 +261,11 @@ void php_array_fill(int start_index, int num, zval* value, zval* result);
 void php_array_fill_keys(zval* keys, zval* value, zval* result);
 
 /**
+ * Merges one or more arrays.
+ */
+void php_array_merge(zval* arr1, zval* arr2, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path

@@ -818,6 +818,48 @@ void php_array_fill_keys(zval* keys, zval* value, zval* result) {
     }
 }
 
+// array_merge implementation
+// Merges one or more arrays
+void php_array_merge(zval* arr1, zval* arr2, zval* result) {
+    if (arr1->type != PHP_TYPE_ARRAY || arr2->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array1 = (php_array*)((long long)arr1->value.ptr_val);
+    php_array* array2 = (php_array*)((long long)arr2->value.ptr_val);
+    if (!array1 || !array2) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Create result array with combined size
+    int totalSize = array1->size + array2->size;
+    php_array_create(result, totalSize);
+
+    // Copy elements from array1
+    for (int i = 0; i < array1->size; i++) {
+        if (array1->elements[i].key != NULL) {
+            // String key - use php_array_set
+            php_array_set(result, array1->elements[i].key, &array1->elements[i].value);
+        } else {
+            // Numeric index - append
+            php_array_append(result, &array1->elements[i].value);
+        }
+    }
+
+    // Copy elements from array2
+    for (int i = 0; i < array2->size; i++) {
+        if (array2->elements[i].key != NULL) {
+            // String key - use php_array_set (overwrites if key exists)
+            php_array_set(result, array2->elements[i].key, &array2->elements[i].value);
+        } else {
+            // Numeric index - append
+            php_array_append(result, &array2->elements[i].value);
+        }
+    }
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>
