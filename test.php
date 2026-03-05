@@ -36,3 +36,9 @@ $combined = array_combine($keys, $values);
 echo "5. array_combine(): ";
 print_r($combined);
 echo "<br><br>";
+
+// 6. array_fill(): Fills an array with values
+$filledArray = array_fill(0, 5, "Hello");
+echo "6. array_fill(): ";
+print_r($filledArray);
+echo "<br><br>";

@@ -145,6 +145,7 @@ class Generator
          $ir[] = "declare void @php_array_chunk(%struct.zval*, i32, i32, %struct.zval*)";
          $ir[] = "declare void @php_array_column(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_combine(%struct.zval*, %struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_array_fill(i32, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
@@ -1073,6 +1074,9 @@ class Generator
         } elseif ($funcCall->name === 'array_combine') {
             $this->generateArrayCombineFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_fill') {
+            $this->generateArrayFillFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1232,6 +1236,34 @@ class Generator
 
         // Call php_array_combine function
         $ir[] = "  call void @php_array_combine(%struct.zval* {$keysPtr}, %struct.zval* {$valuesPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayFillFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 3) {
+            throw new \RuntimeException("array_fill() expects exactly 3 arguments");
+        }
+
+        // Generate the start_index argument
+        $startIndexPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $startIndexInt = $this->getNextTempVariable();
+        $ir[] = "  {$startIndexInt} = call i32 @php_zval_to_int(%struct.zval* {$startIndexPtr})";
+
+        // Generate the num argument
+        $numPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $numInt = $this->getNextTempVariable();
+        $ir[] = "  {$numInt} = call i32 @php_zval_to_int(%struct.zval* {$numPtr})";
+
+        // Generate the value argument
+        $valuePtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_fill function
+        $ir[] = "  call void @php_array_fill(i32 {$startIndexInt}, i32 {$numInt}, %struct.zval* {$valuePtr}, %struct.zval* {$resultPtr})";
         $ir[] = "";
     }
 
@@ -1816,6 +1848,35 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArrayFillExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 3) {
+            throw new \RuntimeException("array_fill() expects exactly 3 arguments");
+        }
+
+        // Generate the start_index argument
+        $startIndexPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        $startIndexInt = $this->getNextTempVariable();
+        $ir[] = "  {$startIndexInt} = call i32 @php_zval_to_int(%struct.zval* {$startIndexPtr})";
+
+        // Generate the num argument
+        $numPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $numInt = $this->getNextTempVariable();
+        $ir[] = "  {$numInt} = call i32 @php_zval_to_int(%struct.zval* {$numPtr})";
+
+        // Generate the value argument
+        $valuePtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_fill function
+        $ir[] = "  call void @php_array_fill(i32 {$startIndexInt}, i32 {$numInt}, %struct.zval* {$valuePtr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
     private function generateOpendirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -2321,6 +2382,8 @@ class Generator
                 return $this->generateArrayColumnExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_combine') {
                 return $this->generateArrayCombineExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_fill') {
+                return $this->generateArrayFillExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'opendir') {
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {

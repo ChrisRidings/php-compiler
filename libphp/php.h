@@ -251,6 +251,11 @@ void php_array_column(zval* arr, zval* column_key_zval, zval* result);
 void php_array_combine(zval* keys, zval* values, zval* result);
 
 /**
+ * Fills an array with values.
+ */
+void php_array_fill(int start_index, int num, zval* value, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path

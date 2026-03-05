@@ -730,6 +730,57 @@ void php_array_combine(zval* keys, zval* values, zval* result) {
     }
 }
 
+// array_fill implementation
+// Fills an array with values, starting at index start_index with num entries of value
+void php_array_fill(int start_index, int num, zval* value, zval* result) {
+    if (num < 0) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Create result array
+    php_array_create(result, num);
+
+    // Fill the array
+    for (int i = 0; i < num; i++) {
+        int index = start_index + i;
+
+        // For numeric indices, use php_array_set_by_index
+        if (index < 0) {
+            // Handle negative index as string key
+            char key_buf[32];
+            sprintf(key_buf, "%d", index);
+            php_array_set(result, key_buf, value);
+        } else {
+            // Handle positive index - we need to use set_by_index
+            // Convert result to array struct
+            php_array* result_arr = (php_array*)((long long)result->value.ptr_val);
+            if (result_arr) {
+                // Ensure capacity
+                if (index >= result_arr->capacity) {
+                    int new_capacity = result_arr->capacity * 2;
+                    while (index >= new_capacity) {
+                        new_capacity *= 2;
+                    }
+                    php_array_element* new_elements = (php_array_element*)realloc(result_arr->elements, sizeof(php_array_element) * new_capacity);
+                    if (!new_elements) return;
+                    result_arr->elements = new_elements;
+                    result_arr->capacity = new_capacity;
+                }
+
+                // Set element at index
+                result_arr->elements[index].key = NULL;  // Numeric key
+                result_arr->elements[index].value = *value;
+
+                // Update size if needed
+                if (index >= result_arr->size) {
+                    result_arr->size = index + 1;
+                }
+            }
+        }
+    }
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>
