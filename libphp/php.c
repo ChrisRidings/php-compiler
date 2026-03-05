@@ -1090,6 +1090,39 @@ int php_array_unshift(zval* arr, zval* value) {
     return array->size;
 }
 
+// array_shift implementation
+// Removes and returns the first element from an array
+// Returns the shifted value in the result parameter, or null if array is empty
+void php_array_shift(zval* arr, zval* result) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array || array->size == 0) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Get the first element
+    *result = array->elements[0].value;
+
+    // If the element has a key, free it (it's being removed from the array)
+    if (array->elements[0].key != NULL) {
+        free(array->elements[0].key);
+        array->elements[0].key = NULL;
+    }
+
+    // Shift all remaining elements one position to the left
+    for (int i = 0; i < array->size - 1; i++) {
+        array->elements[i] = array->elements[i + 1];
+    }
+
+    // Decrease the array size
+    array->size--;
+}
+
 // array_slice implementation
 // Extracts a portion of an array
 // offset: starting position (negative values count from end)

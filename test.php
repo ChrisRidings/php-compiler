@@ -103,3 +103,9 @@ array_unshift($stack, "Mango");
 echo "15. array_unshift(): ";
 print_r($stack);
 echo "<br><br>";
+
+// 16. array_shift(): Removes the first element from an array
+array_shift($stack);
+echo "16. array_shift(): ";
+print_r($stack);
+echo "<br><br>";

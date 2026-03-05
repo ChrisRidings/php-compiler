@@ -153,6 +153,7 @@ class Generator
          $ir[] = "declare i32 @php_array_push(%struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_array_unshift(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_pop(%struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_array_shift(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_slice(%struct.zval*, i32, i32, i32, %struct.zval*)";
          $ir[] = "declare void @php_array_splice(%struct.zval*, i32, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
@@ -1107,6 +1108,9 @@ class Generator
         } elseif ($funcCall->name === 'array_pop') {
             $this->generateArrayPopFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_shift') {
+            $this->generateArrayShiftFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'array_slice') {
             $this->generateArraySliceFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1458,6 +1462,28 @@ class Generator
         $resultPtr = $this->getNextTempVariable();
         $ir[] = "  {$resultPtr} = alloca %struct.zval";
         $ir[] = "  call void @php_array_pop(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayShiftFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("array_shift() expects exactly 1 argument");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_shift() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Shift the first element from the array - allocate result and call function
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_array_shift(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
         $ir[] = "";
     }
 
@@ -2299,6 +2325,29 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArrayShiftExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) !== 1) {
+            throw new \RuntimeException("array_shift() expects exactly 1 argument");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_shift() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Shift the first element from the array
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_array_shift(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
     private function generateArraySliceExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) < 2 || count($funcCall->arguments) > 4) {
@@ -2962,6 +3011,8 @@ class Generator
                 return $this->generateArrayUnshiftExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_pop') {
                 return $this->generateArrayPopExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_shift') {
+                return $this->generateArrayShiftExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_slice') {
                 return $this->generateArraySliceExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_splice') {

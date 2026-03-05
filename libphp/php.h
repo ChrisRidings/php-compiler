@@ -293,6 +293,12 @@ int php_array_unshift(zval* arr, zval* value);
 void php_array_pop(zval* arr, zval* result);
 
 /**
+ * Removes and returns the first element from an array.
+ * Returns the shifted value, or null if array is empty.
+ */
+void php_array_shift(zval* arr, zval* result);
+
+/**
  * Extract a slice of an array.
  *
  * @param arr Source array
