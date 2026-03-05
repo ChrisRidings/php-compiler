@@ -90,3 +90,10 @@ $sliced = array_slice($stack, 1, 2);
 echo "13. array_slice(): ";
 print_r($sliced);
 echo "<br><br>";
+
+// 14. array_splice(): Removes and replaces a portion of an array
+$spliceArray = [1, 2, 3, 4, 5];
+array_splice($spliceArray, 2, 2, ["a", "b"]);
+echo "14. array_splice(): ";
+print_r($spliceArray);
+echo "<br><br>";

@@ -153,6 +153,7 @@ class Generator
          $ir[] = "declare i32 @php_array_push(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_pop(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_slice(%struct.zval*, i32, i32, i32, %struct.zval*)";
+         $ir[] = "declare void @php_array_splice(%struct.zval*, i32, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
@@ -1104,6 +1105,9 @@ class Generator
             return;
         } elseif ($funcCall->name === 'array_slice') {
             $this->generateArraySliceFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'array_splice') {
+            $this->generateArraySpliceFunctionCall($funcCall, $ir, $globalVars);
             return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
@@ -2283,6 +2287,101 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArraySpliceFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 2 || count($funcCall->arguments) > 4) {
+            throw new \RuntimeException("array_splice() expects 2 to 4 arguments");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_splice() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Generate the offset argument
+        $offsetPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $offsetInt = $this->getNextTempVariable();
+        $ir[] = "  {$offsetInt} = call i32 @php_zval_to_int(%struct.zval* {$offsetPtr})";
+
+        // Get length (default = 0)
+        $lengthInt = 0;
+        if (count($funcCall->arguments) > 2) {
+            $lengthPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+            $lengthInt = $this->getNextTempVariable();
+            $ir[] = "  {$lengthInt} = call i32 @php_zval_to_int(%struct.zval* {$lengthPtr})";
+        }
+
+        // Get replacement array (optional)
+        $replPtr = "null";
+        if (count($funcCall->arguments) > 3) {
+            $replPtr = $this->generateExpression($funcCall->arguments[3], $ir, $globalVars);
+        }
+
+        // Allocate result zval for removed elements
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_splice
+        if (count($funcCall->arguments) > 3) {
+            $ir[] = "  call void @php_array_splice(%struct.zval* {$arrayPtr}, i32 {$offsetInt}, i32 {$lengthInt}, %struct.zval* {$replPtr}, %struct.zval* {$resultPtr})";
+        } else {
+            $ir[] = "  call void @php_array_splice(%struct.zval* {$arrayPtr}, i32 {$offsetInt}, i32 {$lengthInt}, %struct.zval* null, %struct.zval* {$resultPtr})";
+        }
+        $ir[] = "";
+    }
+
+    private function generateArraySpliceExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 2 || count($funcCall->arguments) > 4) {
+            throw new \RuntimeException("array_splice() expects 2 to 4 arguments");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_splice() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Generate the offset argument
+        $offsetPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+        $offsetInt = $this->getNextTempVariable();
+        $ir[] = "  {$offsetInt} = call i32 @php_zval_to_int(%struct.zval* {$offsetPtr})";
+
+        // Get length (default = 0)
+        $lengthInt = 0;
+        if (count($funcCall->arguments) > 2) {
+            $lengthPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
+            $lengthInt = $this->getNextTempVariable();
+            $ir[] = "  {$lengthInt} = call i32 @php_zval_to_int(%struct.zval* {$lengthPtr})";
+        }
+
+        // Get replacement array (optional)
+        $replPtr = "null";
+        if (count($funcCall->arguments) > 3) {
+            $replPtr = $this->generateExpression($funcCall->arguments[3], $ir, $globalVars);
+        }
+
+        // Allocate result zval for removed elements
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_splice
+        if (count($funcCall->arguments) > 3) {
+            $ir[] = "  call void @php_array_splice(%struct.zval* {$arrayPtr}, i32 {$offsetInt}, i32 {$lengthInt}, %struct.zval* {$replPtr}, %struct.zval* {$resultPtr})";
+        } else {
+            $ir[] = "  call void @php_array_splice(%struct.zval* {$arrayPtr}, i32 {$offsetInt}, i32 {$lengthInt}, %struct.zval* null, %struct.zval* {$resultPtr})";
+        }
+
+        return $resultPtr;
+    }
+
     private function generateOpendirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -2804,6 +2903,8 @@ class Generator
                 return $this->generateArrayPopExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_slice') {
                 return $this->generateArraySliceExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_splice') {
+                return $this->generateArraySpliceExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'opendir') {
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {

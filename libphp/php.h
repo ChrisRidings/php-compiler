@@ -298,6 +298,16 @@ void php_array_pop(zval* arr, zval* result);
 void php_array_slice(zval* arr, int offset, int length, int preserve_keys, zval* result);
 
 /**
+ * @brief Remove and replace a portion of an array
+ * @param arr Source array (modified in place)
+ * @param offset Starting position (negative values count from end)
+ * @param length Number of elements to remove
+ * @param replacement Array of replacement elements (can be NULL)
+ * @param return_value Output parameter for the removed elements
+ */
+void php_array_splice(zval* arr, int offset, int length, zval* replacement, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path

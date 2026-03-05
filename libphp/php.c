@@ -1099,6 +1099,129 @@ void php_array_slice(zval* arr, int offset, int length, int preserve_keys, zval*
     }
 }
 
+// array_splice implementation
+// Removes a portion of an array and replaces it with something else
+// Modifies the array in place and returns the removed elements
+void php_array_splice(zval* arr, int offset, int length, zval* replacement, zval* return_value) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        php_zval_null(return_value);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        php_zval_null(return_value);
+        return;
+    }
+
+    // Handle negative offset (count from end)
+    int actual_offset = offset;
+    if (actual_offset < 0) {
+        actual_offset = array->size + actual_offset;
+        if (actual_offset < 0) {
+            actual_offset = 0;
+        }
+    }
+
+    // Clamp offset to array size
+    if (actual_offset > array->size) {
+        actual_offset = array->size;
+    }
+
+    // Calculate actual length to remove
+    int actual_length = length;
+    if (actual_length < 0) {
+        // Negative length: remove up to that many from end
+        actual_length = array->size - actual_offset + actual_length;
+        if (actual_length < 0) actual_length = 0;
+    } else if (actual_length == 0) {
+        // Zero length means don't remove anything, just insert
+        actual_length = 0;
+    }
+
+    // Ensure we don't remove more than available
+    if (actual_offset + actual_length > array->size) {
+        actual_length = array->size - actual_offset;
+    }
+
+    // Create return array with removed elements
+    php_array_create(return_value, actual_length);
+
+    // Copy removed elements to return value
+    for (int i = 0; i < actual_length; i++) {
+        php_array_append(return_value, &array->elements[actual_offset + i].value);
+    }
+
+    // Get replacement count
+    int replacement_count = 0;
+    php_array* repl_array = NULL;
+    if (replacement && replacement->type == PHP_TYPE_ARRAY) {
+        repl_array = (php_array*)((long long)replacement->value.ptr_val);
+        if (repl_array) {
+            replacement_count = repl_array->size;
+        }
+    }
+
+    // Calculate new size
+    int new_size = array->size - actual_length + replacement_count;
+
+    // Create new elements array if needed
+    php_array_element* new_elements = NULL;
+    if (new_size > 0) {
+        new_elements = (php_array_element*)malloc(sizeof(php_array_element) * new_size);
+        if (!new_elements) {
+            return;
+        }
+    }
+
+    int new_idx = 0;
+
+    // Copy elements before offset
+    for (int i = 0; i < actual_offset; i++) {
+        new_elements[new_idx] = array->elements[i];
+        if (array->elements[i].key) {
+            new_elements[new_idx].key = strdup(array->elements[i].key);
+        }
+        new_idx++;
+    }
+
+    // Insert replacement elements
+    if (repl_array) {
+        for (int i = 0; i < repl_array->size; i++) {
+            new_elements[new_idx].key = NULL; // Numeric index
+            new_elements[new_idx].value = repl_array->elements[i].value;
+            // Duplicate string values
+            if (repl_array->elements[i].value.type == PHP_TYPE_STRING &&
+                repl_array->elements[i].value.value.str_val) {
+                new_elements[new_idx].value.value.str_val = strdup(repl_array->elements[i].value.value.str_val);
+            }
+            new_idx++;
+        }
+    }
+
+    // Copy elements after removed portion
+    for (int i = actual_offset + actual_length; i < array->size; i++) {
+        new_elements[new_idx] = array->elements[i];
+        if (array->elements[i].key) {
+            new_elements[new_idx].key = strdup(array->elements[i].key);
+        }
+        new_idx++;
+    }
+
+    // Free old elements (but not the values - they're either in return_value or new_elements)
+    for (int i = 0; i < array->size; i++) {
+        if (array->elements[i].key) {
+            free(array->elements[i].key);
+        }
+    }
+    free(array->elements);
+
+    // Update array with new elements
+    array->elements = new_elements;
+    array->size = new_size;
+    array->capacity = new_size > 0 ? new_size : PHP_ARRAY_INITIAL_CAPACITY;
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>
