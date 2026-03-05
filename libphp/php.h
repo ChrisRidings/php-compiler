@@ -276,6 +276,12 @@ void php_array_merge_recursive(zval* arr1, zval* arr2, zval* result);
 void php_array_pad(zval* arr, int size, zval* pad_value, zval* result);
 
 /**
+ * Adds elements to the end of an array.
+ * Returns the new number of elements in the array.
+ */
+int php_array_push(zval* arr, zval* value);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path

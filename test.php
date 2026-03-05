@@ -71,3 +71,10 @@ $paddedArray = array_pad([1, 2], 5, 0);
 echo "10. array_pad(): ";
 print_r($paddedArray);
 echo "<br><br>";
+
+// 11. array_push(): Adds elements to the end of an array
+$stack = ["Banana", "Cherry"];
+array_push($stack, "Apple", "Date");
+echo "11. array_push(): ";
+print_r($stack);
+echo "<br><br>";

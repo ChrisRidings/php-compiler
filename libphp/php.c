@@ -995,6 +995,26 @@ void php_array_pad(zval* arr, int size, zval* pad_value, zval* result) {
     }
 }
 
+// array_push implementation
+// Adds elements to the end of an array
+// Returns the new number of elements in the array
+int php_array_push(zval* arr, zval* value) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        return 0;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        return 0;
+    }
+
+    // Append the value to the array
+    php_array_append(arr, value);
+
+    // Return the new size
+    return array->size;
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>

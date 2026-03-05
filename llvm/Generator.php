@@ -150,6 +150,7 @@ class Generator
          $ir[] = "declare void @php_array_merge(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_merge_recursive(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_pad(%struct.zval*, i32, %struct.zval*, %struct.zval*)";
+         $ir[] = "declare i32 @php_array_push(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
@@ -1093,6 +1094,9 @@ class Generator
         } elseif ($funcCall->name === 'array_pad') {
             $this->generateArrayPadFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_push') {
+            $this->generateArrayPushFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1370,6 +1374,29 @@ class Generator
 
         // Call php_array_pad function
         $ir[] = "  call void @php_array_pad(%struct.zval* {$arrPtr}, i32 {$sizeInt}, %struct.zval* {$padValuePtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayPushFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_push() expects at least 2 arguments");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_push() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Push each value to the array
+        for ($i = 1; $i < count($funcCall->arguments); $i++) {
+            $valuePtr = $this->generateExpression($funcCall->arguments[$i], $ir, $globalVars);
+            $ir[] = "  call i32 @php_array_push(%struct.zval* {$arrayPtr}, %struct.zval* {$valuePtr})";
+        }
         $ir[] = "";
     }
 
@@ -2077,6 +2104,38 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArrayPushExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_push() expects at least 2 arguments");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_push() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Push each value to the array and track the return value (new count)
+        $lastCount = null;
+        for ($i = 1; $i < count($funcCall->arguments); $i++) {
+            $valuePtr = $this->generateExpression($funcCall->arguments[$i], $ir, $globalVars);
+            $countResult = $this->getNextTempVariable();
+            $ir[] = "  {$countResult} = call i32 @php_array_push(%struct.zval* {$arrayPtr}, %struct.zval* {$valuePtr})";
+            $lastCount = $countResult;
+        }
+
+        // Allocate result zval with the last count
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$lastCount})";
+
+        return $resultPtr;
+    }
+
     private function generateOpendirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -2592,6 +2651,8 @@ class Generator
                 return $this->generateArrayMergeRecursiveExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_pad') {
                 return $this->generateArrayPadExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_push') {
+                return $this->generateArrayPushExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'opendir') {
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {
