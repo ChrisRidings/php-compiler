@@ -18,3 +18,13 @@ $chunks = array_chunk($numbers, 2);
 echo "3. array_chunk(): ";
 print_r($chunks);
 echo "<br><br>";
+
+// 4. array_column(): Returns values from a column in an array
+$students = [
+    ["id" => 1, "name" => "Alice"],
+    ["id" => 2, "name" => "Bob"]
+];
+$names = array_column($students, "name");
+echo "4. array_column(): ";
+print_r($names);
+echo "<br><br>";

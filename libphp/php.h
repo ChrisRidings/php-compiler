@@ -241,6 +241,11 @@ void php_array_change_key_case(zval* arr, int case_type, zval* result);
 void php_array_chunk(zval* arr, int size, int preserve_keys, zval* result);
 
 /**
+ * Extracts a column from a multi-dimensional array.
+ */
+void php_array_column(zval* arr, zval* column_key_zval, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path

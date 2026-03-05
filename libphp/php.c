@@ -625,6 +625,68 @@ void php_array_chunk(zval* arr, int size, int preserve_keys, zval* result) {
     }
 }
 
+// array_column implementation
+// Extracts values from a single column of a multi-dimensional array
+void php_array_column(zval* arr, zval* column_key_zval, zval* result) {
+    if (arr->type != PHP_TYPE_ARRAY || column_key_zval == NULL) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Get the column key as string
+    const char* column_key = NULL;
+    if (column_key_zval->type == PHP_TYPE_STRING && column_key_zval->value.str_val != NULL) {
+        column_key = column_key_zval->value.str_val;
+    } else {
+        // If column key is numeric, convert to string
+        column_key = php_zval_to_string(column_key_zval);
+    }
+
+    if (column_key == NULL || column_key[0] == '\0') {
+        php_zval_null(result);
+        return;
+    }
+
+    // Create result array
+    php_array_create(result, array->size);
+
+    // Iterate through the input array
+    for (int i = 0; i < array->size; i++) {
+        // Each element should be an array
+        if (array->elements[i].value.type == PHP_TYPE_ARRAY) {
+            php_array* inner_arr = (php_array*)((long long)array->elements[i].value.value.ptr_val);
+            if (inner_arr) {
+                // Look for the column key in the inner array
+                for (int j = 0; j < inner_arr->size; j++) {
+                    int key_matches = 0;
+
+                    if (inner_arr->elements[j].key != NULL) {
+                        // Compare string keys
+                        key_matches = (strcmp(inner_arr->elements[j].key, column_key) == 0);
+                    } else {
+                        // Compare numeric key
+                        char key_buf[32];
+                        sprintf(key_buf, "%d", j);
+                        key_matches = (strcmp(column_key, key_buf) == 0);
+                    }
+
+                    if (key_matches) {
+                        // Found the column value, add it to result
+                        php_array_append(result, &inner_arr->elements[j].value);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>
