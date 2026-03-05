@@ -148,6 +148,7 @@ class Generator
          $ir[] = "declare void @php_array_fill(i32, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_fill_keys(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_merge(%struct.zval*, %struct.zval*, %struct.zval*)";
+         $ir[] = "declare void @php_array_merge_recursive(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_opendir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_readdir(%struct.zval*, %struct.zval*)";
         $ir[] = "declare void @php_closedir(%struct.zval*, %struct.zval*)";
@@ -1085,6 +1086,9 @@ class Generator
         } elseif ($funcCall->name === 'array_merge') {
             $this->generateArrayMergeFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_merge_recursive') {
+            $this->generateArrayMergeRecursiveFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'opendir') {
             $this->generateOpendirFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1315,6 +1319,27 @@ class Generator
 
         // Call php_array_merge function
         $ir[] = "  call void @php_array_merge(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateArrayMergeRecursiveFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_merge_recursive() expects at least 2 arguments");
+        }
+
+        // Generate the first array argument
+        $arr1Ptr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the second array argument
+        $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_merge_recursive function
+        $ir[] = "  call void @php_array_merge_recursive(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
         $ir[] = "";
     }
 
@@ -1973,6 +1998,28 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArrayMergeRecursiveExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_merge_recursive() expects at least 2 arguments");
+        }
+
+        // Generate the first array argument
+        $arr1Ptr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+
+        // Generate the second array argument
+        $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_array_merge_recursive function
+        $ir[] = "  call void @php_array_merge_recursive(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
     private function generateOpendirExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -2484,6 +2531,8 @@ class Generator
                 return $this->generateArrayFillKeysExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_merge') {
                 return $this->generateArrayMergeExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_merge_recursive') {
+                return $this->generateArrayMergeRecursiveExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'opendir') {
                 return $this->generateOpendirExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'readdir') {

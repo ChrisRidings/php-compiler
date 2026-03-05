@@ -860,6 +860,79 @@ void php_array_merge(zval* arr1, zval* arr2, zval* result) {
     }
 }
 
+// array_merge_recursive implementation
+// Recursively merges one or more arrays
+// When both arrays have the same string key and both values are arrays,
+// they are recursively merged instead of overwriting
+void php_array_merge_recursive(zval* arr1, zval* arr2, zval* result) {
+    if (arr1->type != PHP_TYPE_ARRAY || arr2->type != PHP_TYPE_ARRAY) {
+        php_zval_null(result);
+        return;
+    }
+
+    php_array* array1 = (php_array*)((long long)arr1->value.ptr_val);
+    php_array* array2 = (php_array*)((long long)arr2->value.ptr_val);
+    if (!array1 || !array2) {
+        php_zval_null(result);
+        return;
+    }
+
+    // Create result array with combined size (estimate)
+    int totalSize = array1->size + array2->size;
+    php_array_create(result, totalSize);
+
+    // Copy elements from array1 first
+    for (int i = 0; i < array1->size; i++) {
+        if (array1->elements[i].key != NULL) {
+            php_array_set(result, array1->elements[i].key, &array1->elements[i].value);
+        } else {
+            php_array_append(result, &array1->elements[i].value);
+        }
+    }
+
+    // Copy elements from array2, with recursive merge for matching string keys
+    for (int i = 0; i < array2->size; i++) {
+        if (array2->elements[i].key != NULL) {
+            // Check if this key already exists in result
+            int key_exists = 0;
+            php_array* result_arr = (php_array*)((long long)result->value.ptr_val);
+
+            for (int j = 0; j < result_arr->size; j++) {
+                if (result_arr->elements[j].key != NULL &&
+                    strcmp(result_arr->elements[j].key, array2->elements[i].key) == 0) {
+                    key_exists = 1;
+
+                    // Both values are arrays - merge recursively
+                    if (result_arr->elements[j].value.type == PHP_TYPE_ARRAY &&
+                        array2->elements[i].value.type == PHP_TYPE_ARRAY) {
+                        zval merged;
+                        php_array_merge_recursive(&result_arr->elements[j].value,
+                                                  &array2->elements[i].value,
+                                                  &merged);
+                        result_arr->elements[j].value = merged;
+                    } else {
+                        // Not both arrays - convert to array with both values
+                        zval new_array;
+                        php_array_create(&new_array, 2);
+                        php_array_append(&new_array, &result_arr->elements[j].value);
+                        php_array_append(&new_array, &array2->elements[i].value);
+                        result_arr->elements[j].value = new_array;
+                    }
+                    break;
+                }
+            }
+
+            // Key doesn't exist - just set it
+            if (!key_exists) {
+                php_array_set(result, array2->elements[i].key, &array2->elements[i].value);
+            }
+        } else {
+            // Numeric index - always append
+            php_array_append(result, &array2->elements[i].value);
+        }
+    }
+}
+
 // Directory functions - Windows compatible
 #ifdef _WIN32
 #include <windows.h>

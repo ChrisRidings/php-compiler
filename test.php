@@ -57,3 +57,11 @@ $merged = array_merge($array1, $array2);
 echo "8. array_merge(): ";
 print_r($merged);
 echo "<br><br>";
+
+// 9. array_merge_recursive(): Recursively merges arrays
+$array1 = ["a" => [1], "b" => [2]];
+$array2 = ["a" => [3]];
+$recursiveMerge = array_merge_recursive($array1, $array2);
+echo "9. array_merge_recursive(): ";
+print_r($recursiveMerge);
+echo "<br><br>";

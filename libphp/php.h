@@ -266,6 +266,11 @@ void php_array_fill_keys(zval* keys, zval* value, zval* result);
 void php_array_merge(zval* arr1, zval* arr2, zval* result);
 
 /**
+ * Recursively merges one or more arrays.
+ */
+void php_array_merge_recursive(zval* arr1, zval* arr2, zval* result);
+
+/**
  * Opens a directory for reading.
  *
  * @param path The directory path
