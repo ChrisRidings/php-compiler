@@ -151,6 +151,7 @@ class Generator
          $ir[] = "declare void @php_array_merge_recursive(%struct.zval*, %struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_pad(%struct.zval*, i32, %struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_array_push(%struct.zval*, %struct.zval*)";
+         $ir[] = "declare i32 @php_array_unshift(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_pop(%struct.zval*, %struct.zval*)";
          $ir[] = "declare void @php_array_slice(%struct.zval*, i32, i32, i32, %struct.zval*)";
          $ir[] = "declare void @php_array_splice(%struct.zval*, i32, i32, %struct.zval*, %struct.zval*)";
@@ -1100,6 +1101,9 @@ class Generator
         } elseif ($funcCall->name === 'array_push') {
             $this->generateArrayPushFunctionCall($funcCall, $ir, $globalVars);
             return;
+        } elseif ($funcCall->name === 'array_unshift') {
+            $this->generateArrayUnshiftFunctionCall($funcCall, $ir, $globalVars);
+            return;
         } elseif ($funcCall->name === 'array_pop') {
             $this->generateArrayPopFunctionCall($funcCall, $ir, $globalVars);
             return;
@@ -1408,6 +1412,29 @@ class Generator
         for ($i = 1; $i < count($funcCall->arguments); $i++) {
             $valuePtr = $this->generateExpression($funcCall->arguments[$i], $ir, $globalVars);
             $ir[] = "  call i32 @php_array_push(%struct.zval* {$arrayPtr}, %struct.zval* {$valuePtr})";
+        }
+        $ir[] = "";
+    }
+
+    private function generateArrayUnshiftFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_unshift() expects at least 2 arguments");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_unshift() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Unshift each value to the beginning of the array (in order, so last one ends up first)
+        for ($i = count($funcCall->arguments) - 1; $i >= 1; $i--) {
+            $valuePtr = $this->generateExpression($funcCall->arguments[$i], $ir, $globalVars);
+            $ir[] = "  call i32 @php_array_unshift(%struct.zval* {$arrayPtr}, %struct.zval* {$valuePtr})";
         }
         $ir[] = "";
     }
@@ -2217,6 +2244,38 @@ class Generator
         return $resultPtr;
     }
 
+    private function generateArrayUnshiftExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        if (count($funcCall->arguments) < 2) {
+            throw new \RuntimeException("array_unshift() expects at least 2 arguments");
+        }
+
+        // First argument must be a variable reference (the array to modify)
+        $arrayArg = $funcCall->arguments[0];
+        if (!$arrayArg instanceof VariableReference) {
+            throw new \RuntimeException("array_unshift() first argument must be a variable");
+        }
+
+        $arrayVarName = $arrayArg->name;
+        $arrayPtr = "%{$arrayVarName}";
+
+        // Unshift each value to the beginning of the array (in reverse order to maintain correct order)
+        $lastCount = null;
+        for ($i = count($funcCall->arguments) - 1; $i >= 1; $i--) {
+            $valuePtr = $this->generateExpression($funcCall->arguments[$i], $ir, $globalVars);
+            $countResult = $this->getNextTempVariable();
+            $ir[] = "  {$countResult} = call i32 @php_array_unshift(%struct.zval* {$arrayPtr}, %struct.zval* {$valuePtr})";
+            $lastCount = $countResult;
+        }
+
+        // Allocate result zval with the last count
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$lastCount})";
+
+        return $resultPtr;
+    }
+
     private function generateArrayPopExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
     {
         if (count($funcCall->arguments) !== 1) {
@@ -2899,6 +2958,8 @@ class Generator
                 return $this->generateArrayPadExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_push') {
                 return $this->generateArrayPushExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'array_unshift') {
+                return $this->generateArrayUnshiftExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_pop') {
                 return $this->generateArrayPopExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'array_slice') {

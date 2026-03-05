@@ -97,3 +97,9 @@ array_splice($spliceArray, 2, 2, ["a", "b"]);
 echo "14. array_splice(): ";
 print_r($spliceArray);
 echo "<br><br>";
+
+// 15. array_unshift(): Adds elements to the beginning of an array
+array_unshift($stack, "Mango");
+echo "15. array_unshift(): ";
+print_r($stack);
+echo "<br><br>";

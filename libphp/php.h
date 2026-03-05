@@ -281,6 +281,12 @@ void php_array_pad(zval* arr, int size, zval* pad_value, zval* result);
 int php_array_push(zval* arr, zval* value);
 
 /**
+ * Prepends elements to the beginning of an array.
+ * Returns the new number of elements in the array.
+ */
+int php_array_unshift(zval* arr, zval* value);
+
+/**
  * Removes and returns the last element from an array.
  * Returns the popped value, or null if array is empty.
  */

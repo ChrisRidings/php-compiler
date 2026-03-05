@@ -1044,6 +1044,52 @@ void php_array_pop(zval* arr, zval* result) {
     array->size--;
 }
 
+// array_unshift implementation
+// Prepends elements to the beginning of an array
+// Modifies the array in place and returns the new number of elements
+int php_array_unshift(zval* arr, zval* value) {
+    if (arr->type != PHP_TYPE_ARRAY) {
+        return 0;
+    }
+
+    php_array* array = (php_array*)((long long)arr->value.ptr_val);
+    if (!array) {
+        return 0;
+    }
+
+    // Resize if needed
+    if (array->size >= array->capacity) {
+        int new_capacity = array->capacity * 2;
+        php_array_element* new_elements = (php_array_element*)realloc(array->elements, sizeof(php_array_element) * new_capacity);
+        if (!new_elements) return array->size;
+        array->elements = new_elements;
+        array->capacity = new_capacity;
+    }
+
+    // Shift all existing elements one position to the right
+    // Start from the end and move backwards to avoid overwriting
+    for (int i = array->size; i > 0; i--) {
+        array->elements[i] = array->elements[i - 1];
+        // Duplicate string keys if present
+        if (array->elements[i].key != NULL) {
+            array->elements[i].key = strdup(array->elements[i].key);
+        }
+    }
+
+    // Insert the new value at the beginning
+    array->elements[0].key = NULL;  // Numeric index
+    array->elements[0].value = *value;
+    // Duplicate string value if needed
+    if (value->type == PHP_TYPE_STRING && value->value.str_val != NULL) {
+        array->elements[0].value.value.str_val = strdup(value->value.str_val);
+    }
+
+    array->size++;
+
+    // Return the new size
+    return array->size;
+}
+
 // array_slice implementation
 // Extracts a portion of an array
 // offset: starting position (negative values count from end)
