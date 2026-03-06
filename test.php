@@ -1,9 +1,16 @@
 <?php
-function adder(&$str2)
-{
-    $str2 .= 'Call By Reference';
+function factorial($n) {
+    if ($n <= 1) {
+        return 1;
+    }
+    return $n * factorial($n - 1);
 }
-$str = 'Hello ';
-adder($str);
-echo $str;
+
+$start = microtime(true);
+$result = factorial(100);
+$end = microtime(true);
+
+echo "Factorial of 100 calculated\n";
+echo $result . "\n";
+echo "Time: " . ($end - $start) . " seconds\n";
 ?>

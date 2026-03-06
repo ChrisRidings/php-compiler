@@ -187,7 +187,23 @@ char* php_zval_to_string(const zval* z) {
         case PHP_TYPE_NULL:
             return "";  // PHP: null converts to empty string in concatenation
         case PHP_TYPE_DOUBLE:
-            sprintf(buffer, "%.14g", z->value.double_val);
+            {
+                char temp[32];
+                sprintf(temp, "%.14g", z->value.double_val);
+                // Replace lowercase e with uppercase E for scientific notation
+                for (int i = 0; temp[i]; i++) {
+                    if (temp[i] == 'e') {
+                        temp[i] = 'E';
+                        // Remove leading zero in exponent if present (e.g., E-05 -> E-5)
+                        if (temp[i+1] == '-' && temp[i+2] == '0') {
+                            memmove(&temp[i+2], &temp[i+3], strlen(temp) - i - 2);
+                        } else if (temp[i+1] == '+' && temp[i+2] == '0') {
+                            memmove(&temp[i+2], &temp[i+3], strlen(temp) - i - 2);
+                        }
+                    }
+                }
+                strcpy(buffer, temp);
+            }
             return buffer;
         case PHP_TYPE_BOOL:
             return z->value.bool_val ? "1" : "";
@@ -198,6 +214,26 @@ char* php_zval_to_string(const zval* z) {
             return z->value.str_val ? z->value.str_val : "NULL";
         default:
             return "Unknown type";
+    }
+}
+
+double php_zval_to_double(const zval* z) {
+    switch (z->type) {
+        case PHP_TYPE_NULL:
+            return 0.0;
+        case PHP_TYPE_BOOL:
+            return z->value.bool_val ? 1.0 : 0.0;
+        case PHP_TYPE_INT:
+            return (double)z->value.int_val;
+        case PHP_TYPE_DOUBLE:
+            return z->value.double_val;
+        case PHP_TYPE_STRING:
+            if (z->value.str_val == NULL) {
+                return 0.0;
+            }
+            return atof(z->value.str_val);
+        default:
+            return 0.0;
     }
 }
 
@@ -2725,6 +2761,65 @@ int php_settype(zval* z, const char* type) {
     }
 
     return 1;  // Success
+}
+
+// microtime implementation - returns current time in seconds with microseconds
+// If get_as_float is true, returns float; otherwise returns string "seconds microseconds"
+void php_microtime(zval* get_as_float, zval* result) {
+    #ifdef _WIN32
+    // Windows: Use QueryPerformanceCounter for high-resolution timing
+    LARGE_INTEGER counter, frequency;
+    QueryPerformanceCounter(&counter);
+    QueryPerformanceFrequency(&frequency);
+
+    double seconds = (double)counter.QuadPart / (double)frequency.QuadPart;
+    #else
+    // POSIX: Use gettimeofday
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    double seconds = tv.tv_sec + tv.tv_usec / 1000000.0;
+    #endif
+
+    // Check if we should return float or string
+    int as_float = 0;
+    if (get_as_float != NULL) {
+        if (get_as_float->type == PHP_TYPE_BOOL) {
+            as_float = get_as_float->value.bool_val;
+        } else if (get_as_float->type == PHP_TYPE_INT) {
+            as_float = (get_as_float->value.int_val != 0);
+        } else if (get_as_float->type == PHP_TYPE_DOUBLE) {
+            as_float = (get_as_float->value.double_val != 0.0);
+        } else if (get_as_float->type == PHP_TYPE_STRING && get_as_float->value.str_val != NULL) {
+            as_float = (strlen(get_as_float->value.str_val) > 0 && strcmp(get_as_float->value.str_val, "0") != 0);
+        }
+    }
+
+    if (as_float) {
+        // Return as float (seconds with microsecond precision)
+        php_zval_double(result, seconds);
+    } else {
+        // Return as string "seconds microseconds"
+        #ifdef _WIN32
+        LARGE_INTEGER counter, frequency;
+        QueryPerformanceCounter(&counter);
+        QueryPerformanceFrequency(&frequency);
+
+        // Calculate seconds and microseconds separately
+        __int64 total_microseconds = (counter.QuadPart * 1000000) / frequency.QuadPart;
+        long secs = (long)(total_microseconds / 1000000);
+        long usecs = (long)(total_microseconds % 1000000);
+        #else
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        long secs = tv.tv_sec;
+        long usecs = tv.tv_usec;
+        #endif
+
+        // Format as PHP does: "seconds.microseconds"
+        char buf[32];
+        sprintf(buf, "%ld.%06ld", secs, usecs);
+        php_zval_string(result, buf);
+    }
 }
 
 // Function registry for user-defined functions

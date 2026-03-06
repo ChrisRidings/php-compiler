@@ -79,6 +79,7 @@ enum TokenType: int
     case T_GETTYPE = 71;         // gettype keyword
     case T_SETTYPE = 72;         // settype keyword
     case T_AMPERSAND = 73;       // & operator (reference)
+    case T_MICROTIME = 74;       // microtime function
 }
 
 class Token

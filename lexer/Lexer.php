@@ -44,6 +44,7 @@ class Lexer
         TokenType::T_EMPTY->value => '/^empty\b/i',
         TokenType::T_GETTYPE->value => '/^gettype\b/i',
         TokenType::T_SETTYPE->value => '/^settype\b/i',
+        TokenType::T_MICROTIME->value => '/^microtime\b/i',
         // String literals - simple pattern that matches anything between quotes
         // Double-quoted strings can have escaped quotes, single-quoted treat \' as escape
         TokenType::T_STRING->value => '/^(?:"[^"]*"|\'[^\']*\')/',

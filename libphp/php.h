@@ -120,6 +120,14 @@ char* php_zval_to_string(const zval* z);
 int php_zval_to_int(const zval* z);
 
 /**
+ * Converts a zval to double.
+ *
+ * @param z The zval to convert
+ * @return Double value
+ */
+double php_zval_to_double(const zval* z);
+
+/**
  * Prints a zval to standard output.
  */
 void php_echo_zval(const zval* z);
@@ -559,6 +567,15 @@ void php_gettype(zval* z, zval* result);
  * @return 1 on success, 0 on failure
  */
 int php_settype(zval* z, const char* type);
+
+/**
+ * Returns the current time in seconds with microseconds.
+ * Matches PHP's microtime() function behavior.
+ *
+ * @param get_as_float If true, returns float seconds; if false, returns string "seconds microseconds"
+ * @param result The result zval (will contain float or string depending on parameter)
+ */
+void php_microtime(zval* get_as_float, zval* result);
 
 /**
  * Calls a function by name with the given arguments.

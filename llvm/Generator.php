@@ -120,16 +120,17 @@ class Generator
         $ir[] = "%union.zval_value = type { i64 }"; // on x86_64, all union members are 8 bytes
         $ir[] = "";
 
-        // Declare external zval functions (pass by pointer)
-        $ir[] = "declare void @php_echo_zval(%struct.zval*)";
-        $ir[] = "declare void @php_zval_null(%struct.zval*)";
-        $ir[] = "declare void @php_zval_bool(%struct.zval*, i32)";
-        $ir[] = "declare void @php_zval_int(%struct.zval*, i32)";
-        $ir[] = "declare void @php_zval_double(%struct.zval*, double)";
-        $ir[] = "declare void @php_zval_string(%struct.zval*, i8*)";
-        $ir[] = "declare void @php_zval_string_literal(%struct.zval*, i8*)";
-        $ir[] = "declare i8* @php_zval_to_string(%struct.zval*)";
-        $ir[] = "declare i32 @php_zval_to_int(%struct.zval*)";
+    // Declare external zval functions (pass by pointer)
+    $ir[] = "declare void @php_echo_zval(%struct.zval*)";
+    $ir[] = "declare void @php_zval_null(%struct.zval*)";
+    $ir[] = "declare void @php_zval_bool(%struct.zval*, i32)";
+    $ir[] = "declare void @php_zval_int(%struct.zval*, i32)";
+    $ir[] = "declare void @php_zval_double(%struct.zval*, double)";
+    $ir[] = "declare void @php_zval_string(%struct.zval*, i8*)";
+    $ir[] = "declare void @php_zval_string_literal(%struct.zval*, i8*)";
+    $ir[] = "declare i8* @php_zval_to_string(%struct.zval*)";
+    $ir[] = "declare i32 @php_zval_to_int(%struct.zval*)";
+    $ir[] = "declare double @php_zval_to_double(%struct.zval*)";
         $ir[] = "declare void @php_echo(i8*)";
         $ir[] = "declare i8* @php_itoa(i32)";
         $ir[] = "declare i8* @php_concat_strings(i8*, i8*)";
@@ -189,6 +190,7 @@ class Generator
          $ir[] = "declare i32 @php_empty(%struct.zval*)";
          $ir[] = "declare void @php_gettype(%struct.zval*, %struct.zval*)";
          $ir[] = "declare i32 @php_settype(%struct.zval*, i8*)";
+         $ir[] = "declare void @php_microtime(%struct.zval*, %struct.zval*)";
          $ir[] = "; Variable function call support";
          $ir[] = "declare void @php_variable_call(%struct.zval*, %struct.zval*, i32, %struct.zval*)";
          $ir[] = "";
@@ -1262,6 +1264,9 @@ class Generator
             return;
         } elseif ($funcCall->name === 'settype') {
             $this->generateSettypeFunctionCall($funcCall, $ir, $globalVars);
+            return;
+        } elseif ($funcCall->name === 'microtime') {
+            $this->generateMicrotimeFunctionCall($funcCall, $ir, $globalVars);
             return;
         }
 
@@ -3127,6 +3132,55 @@ class Generator
         $ir[] = "";
     }
 
+    private function generateMicrotimeFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
+    {
+        // microtime() accepts 0 or 1 argument
+        // If argument is true, returns float; otherwise returns string
+
+        // Generate the get_as_float argument (defaults to false if not provided)
+        if (count($funcCall->arguments) > 0) {
+            $getAsFloatPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        } else {
+            // Default to false
+            $getAsFloatPtr = $this->getNextTempVariable();
+            $ir[] = "  {$getAsFloatPtr} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_bool(%struct.zval* {$getAsFloatPtr}, i32 0)";
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_microtime function
+        $ir[] = "  call void @php_microtime(%struct.zval* {$getAsFloatPtr}, %struct.zval* {$resultPtr})";
+        $ir[] = "";
+    }
+
+    private function generateMicrotimeExpression(FunctionCall $funcCall, array &$ir, array $globalVars): string
+    {
+        // microtime() accepts 0 or 1 argument
+        // If argument is true, returns float; otherwise returns string
+
+        // Generate the get_as_float argument (defaults to false if not provided)
+        if (count($funcCall->arguments) > 0) {
+            $getAsFloatPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
+        } else {
+            // Default to false
+            $getAsFloatPtr = $this->getNextTempVariable();
+            $ir[] = "  {$getAsFloatPtr} = alloca %struct.zval";
+            $ir[] = "  call void @php_zval_bool(%struct.zval* {$getAsFloatPtr}, i32 0)";
+        }
+
+        // Allocate result zval
+        $resultPtr = $this->getNextTempVariable();
+        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+
+        // Call php_microtime function
+        $ir[] = "  call void @php_microtime(%struct.zval* {$getAsFloatPtr}, %struct.zval* {$resultPtr})";
+
+        return $resultPtr;
+    }
+
     private function generateEchoStatement(EchoStatement $statement, array &$ir, array $globalVars): void
     {
         foreach ($statement->expressions as $expression) {
@@ -3234,6 +3288,8 @@ class Generator
                 return $this->generateGettypeExpression($expression, $ir, $globalVars);
             } elseif ($expression->name === 'settype') {
                 return $this->generateSettypeExpression($expression, $ir, $globalVars);
+            } elseif ($expression->name === 'microtime') {
+                return $this->generateMicrotimeExpression($expression, $ir, $globalVars);
             }
 
             // First, find the function definition to know which parameters are by reference
@@ -3498,29 +3554,29 @@ class Generator
 
         switch ($op->operator) {
             case '+':
+            case '+':
             case '-':
             case '*':
-                // Convert both operands to integers
-                $leftInt = $this->getNextTempVariable();
-                $rightInt = $this->getNextTempVariable();
-                $ir[] = "  {$leftInt} = call i32 @php_zval_to_int(%struct.zval* {$leftZval})";
-                $ir[] = "  {$rightInt} = call i32 @php_zval_to_int(%struct.zval* {$rightZval})";
+                // Use php_zval_to_double directly to handle all types properly
+                $leftDouble = $this->getNextTempVariable();
+                $rightDouble = $this->getNextTempVariable();
+                $ir[] = "  {$leftDouble} = call double @php_zval_to_double(%struct.zval* {$leftZval})";
+                $ir[] = "  {$rightDouble} = call double @php_zval_to_double(%struct.zval* {$rightZval})";
 
-                $intResult = $this->getNextTempVariable();
-
+                $doubleResult = $this->getNextTempVariable();
                 switch ($op->operator) {
                     case '+':
-                        $ir[] = "  {$intResult} = add i32 {$leftInt}, {$rightInt}";
+                        $ir[] = "  {$doubleResult} = fadd double {$leftDouble}, {$rightDouble}";
                         break;
                     case '-':
-                        $ir[] = "  {$intResult} = sub i32 {$leftInt}, {$rightInt}";
+                        $ir[] = "  {$doubleResult} = fsub double {$leftDouble}, {$rightDouble}";
                         break;
                     case '*':
-                        $ir[] = "  {$intResult} = mul i32 {$leftInt}, {$rightInt}";
+                        $ir[] = "  {$doubleResult} = fmul double {$leftDouble}, {$rightDouble}";
                         break;
                 }
 
-                $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 {$intResult})";
+                $ir[] = "  call void @php_zval_double(%struct.zval* {$result}, double {$doubleResult})";
                 break;
 
             case '/':

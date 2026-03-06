@@ -1088,6 +1088,29 @@ class Parser
             return $this->parseSettypeExpression();
         }
 
+        // Handle microtime() function - returns current timestamp as float
+        if ($token->type === TokenType::T_MICROTIME) {
+            $microtimeToken = $this->consumeToken();
+            $this->consumeTokenOfType(TokenType::T_LPAREN);
+
+            // Optional boolean parameter - if true, returns seconds as float
+            $getAsFloat = false;
+            if ($this->currentToken() && $this->currentToken()->type === TokenType::T_TRUE) {
+                $getAsFloat = true;
+                $this->consumeToken();
+            }
+
+            $this->consumeTokenOfType(TokenType::T_RPAREN);
+
+            // Return as FunctionCall - generator will handle it
+            return new FunctionCall(
+                'microtime',
+                [$getAsFloat ? new BooleanLiteral(true, $microtimeToken->line, $microtimeToken->column) : new BooleanLiteral(false, $microtimeToken->line, $microtimeToken->column)],
+                $microtimeToken->line,
+                $microtimeToken->column
+            );
+        }
+
         // Handle assignment as expression: $var = expr
         if ($token->type === TokenType::T_VARIABLE && $this->peekToken() &&
             ($this->peekToken()->type === TokenType::T_ASSIGN ||
