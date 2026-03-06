@@ -28,6 +28,7 @@ enum TokenType: int
     case T_MINUS = 20;
     case T_MULTIPLY = 21;
     case T_DIVIDE = 22;
+    case T_MOD = 84;
     case T_IF = 23;
     case T_ELSE = 24;
     case T_GREATER = 25;

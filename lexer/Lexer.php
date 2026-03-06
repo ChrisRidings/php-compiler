@@ -81,6 +81,7 @@ class Lexer
         TokenType::T_MINUS->value => '/^-/',
         TokenType::T_MULTIPLY->value => '/^\*/',
         TokenType::T_DIVIDE->value => '/^\//',
+        TokenType::T_MOD->value => '/^%/',
         TokenType::T_SEMICOLON->value => '/^;/',
         TokenType::T_COLON->value => '/^:/',
          TokenType::T_QUESTION->value => '/^\?/',

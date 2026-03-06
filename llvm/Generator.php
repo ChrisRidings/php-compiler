@@ -3597,6 +3597,18 @@ class Generator
 
                 $ir[] = "  call void @php_zval_double(%struct.zval* {$result}, double {$doubleResult})";
                 break;
+            case '%':
+                // Modulus - integer division remainder
+                $leftInt = $this->getNextTempVariable();
+                $rightInt = $this->getNextTempVariable();
+                $ir[] = "  {$leftInt} = call i32 @php_zval_to_int(%struct.zval* {$leftZval})";
+                $ir[] = "  {$rightInt} = call i32 @php_zval_to_int(%struct.zval* {$rightZval})";
+
+                $modResult = $this->getNextTempVariable();
+                $ir[] = "  {$modResult} = srem i32 {$leftInt}, {$rightInt}";
+
+                $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 {$modResult})";
+                break;
             case '.':
                 // String concatenation - convert both to strings
                 $leftStr = $this->getNextTempVariable();

@@ -1029,11 +1029,12 @@ class Parser
     {
         $term = $this->parsePrimary();
 
-        while ($this->currentToken() && in_array($this->currentToken()->type, [TokenType::T_MULTIPLY, TokenType::T_DIVIDE])) {
+        while ($this->currentToken() && in_array($this->currentToken()->type, [TokenType::T_MULTIPLY, TokenType::T_DIVIDE, TokenType::T_MOD])) {
             $operatorToken = $this->consumeToken();
             $operator = match ($operatorToken->type) {
                 TokenType::T_MULTIPLY => BinaryOperation::OP_MULTIPLY,
                 TokenType::T_DIVIDE => BinaryOperation::OP_DIVIDE,
+                TokenType::T_MOD => BinaryOperation::OP_MOD,
                 default => throw new \RuntimeException("Unexpected operator at " . $operatorToken->line . ":" . $operatorToken->column),
             };
             $right = $this->parsePrimary();

@@ -19,6 +19,7 @@ class BinaryOperation extends Expression
     public const OP_IDENTICAL = '===';
     public const OP_NOT_IDENTICAL = '!==';
     public const OP_CONCAT = '.';
+    public const OP_MOD = '%';
 
     public function __construct(
         public Expression $left,

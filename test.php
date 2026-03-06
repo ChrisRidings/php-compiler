@@ -1,16 +1,31 @@
 <?php
-function factorial($n) {
-    if ($n <= 1) {
-        return 1;
+
+function count_primes($limit) {
+    $count = 0;
+
+    for ($i = 2; $i <= $limit; $i++) {
+        $prime = true;
+
+        for ($j = 2; $j * $j <= $i; $j++) {
+            if ($i % $j == 0) {
+                $prime = false;
+                break;
+            }
+        }
+
+        if ($prime) {
+            $count++;
+        }
     }
-    return $n * factorial($n - 1);
+
+    return $count;
 }
 
 $start = microtime(true);
-$result = factorial(100);
+
+$result = count_primes(2000);
+
 $end = microtime(true);
 
-echo "Factorial of 100 calculated\n";
-echo $result . "\n";
-echo "Time: " . ($end - $start) . " seconds\n";
-?>
+echo "Primes: $result\n";
+echo "Time: " . ($end - $start) . "\n";
