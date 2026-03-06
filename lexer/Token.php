@@ -78,6 +78,7 @@ enum TokenType: int
     case T_EMPTY = 70;           // empty keyword
     case T_GETTYPE = 71;         // gettype keyword
     case T_SETTYPE = 72;         // settype keyword
+    case T_AMPERSAND = 73;       // & operator (reference)
 }
 
 class Token

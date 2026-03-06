@@ -95,9 +95,24 @@ class Parser
             }
             // Create an expression statement to wrap the function call
             return new ExpressionStatement($call, $token->line, $token->column);
-        } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && $this->peekToken()->type === TokenType::T_ASSIGN) {
-            // Assignment statement - wrap the expression in an ExpressionStatement
-            $assignment = $this->parseAssignment();
+        } elseif ($token->type === TokenType::T_VARIABLE && $this->peekToken() && in_array($this->peekToken()->type, [
+            TokenType::T_ASSIGN,
+            TokenType::T_ASSIGN_PLUS,
+            TokenType::T_ASSIGN_MINUS,
+            TokenType::T_ASSIGN_MULTIPLY,
+            TokenType::T_ASSIGN_DIVIDE,
+            TokenType::T_CONCAT  // For .= operator (T_CONCAT followed by T_ASSIGN)
+        ])) {
+            // Check if it's the .= operator (T_CONCAT followed by T_ASSIGN)
+            if ($this->peekToken()->type === TokenType::T_CONCAT &&
+                $this->peekToken(2) && $this->peekToken(2)->type === TokenType::T_ASSIGN) {
+                // This is a concatenation assignment
+                $assignment = $this->parseAssignment();
+            } else {
+                // Regular assignment
+                $assignment = $this->parseAssignment();
+            }
+
             // Consume semicolon if present
             if ($this->currentToken() && $this->currentToken()->type === TokenType::T_SEMICOLON) {
                 $this->consumeToken();
@@ -468,10 +483,17 @@ class Parser
             $this->consumeToken(); // Skip type hint
         }
 
+        // Check for reference parameter (&)
+        $byReference = false;
+        if ($this->currentToken() && $this->currentToken()->type === TokenType::T_AMPERSAND) {
+            $byReference = true;
+            $this->consumeToken();
+        }
+
         // Now expect the variable name
         if ($this->currentToken() && $this->currentToken()->type === TokenType::T_VARIABLE) {
             $paramToken = $this->consumeToken();
-            return new Parameter(ltrim($paramToken->value, '$'), $paramToken->line, $paramToken->column);
+            return new Parameter(ltrim($paramToken->value, '$'), $byReference, $paramToken->line, $paramToken->column);
         }
 
         return null;
@@ -543,6 +565,10 @@ class Parser
         } elseif ($opToken->type === TokenType::T_ASSIGN_DIVIDE) {
             $operator = '/=';
             $this->consumeToken();
+        } elseif ($opToken->type === TokenType::T_CONCAT && $this->peekToken() && $this->peekToken()->type === TokenType::T_ASSIGN) {
+            $operator = '.=';
+            $this->consumeToken(); // Consume .
+            $this->consumeToken(); // Consume =
         } else {
             throw new \RuntimeException("Expected assignment operator at line {$opToken->line}, column {$opToken->column}");
         }

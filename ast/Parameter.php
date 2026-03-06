@@ -8,6 +8,7 @@ class Parameter extends Node
 {
     public function __construct(
         public readonly string $name,
+        public readonly bool $byReference = false,
         int $line = 1,
         int $column = 1
     ) {
@@ -16,6 +17,6 @@ class Parameter extends Node
 
     public function __toString(): string
     {
-        return $this->name;
+        return ($this->byReference ? '&' : '') . $this->name;
     }
 }

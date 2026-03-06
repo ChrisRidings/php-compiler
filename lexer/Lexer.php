@@ -82,7 +82,8 @@ class Lexer
         TokenType::T_DIVIDE->value => '/^\//',
         TokenType::T_SEMICOLON->value => '/^;/',
         TokenType::T_COLON->value => '/^:/',
-        TokenType::T_QUESTION->value => '/^\?/',
+         TokenType::T_QUESTION->value => '/^\?/',
+        TokenType::T_AMPERSAND->value => '/^\&/',
         TokenType::T_WHITESPACE->value => '/^\s+/',
     ];
 

@@ -769,31 +769,46 @@ class Generator
             $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
             $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
         } else {
-            // Compound assignment (+=, -=, *=, /=)
-            $currentVal = $this->getNextTempVariable();
-            $ir[] = "  {$currentVal} = call i32 @php_zval_to_int(%struct.zval* %{$varName})";
+            // Compound assignment (+=, -=, *=, /=, .=)
+            if ($assignment->operator === '.=') {
+                // String concatenation assignment
+                $currentStr = $this->getNextTempVariable();
+                $ir[] = "  {$currentStr} = call i8* @php_zval_to_string(%struct.zval* %{$varName})";
 
-            $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
-            $valueVal = $this->getNextTempVariable();
-            $ir[] = "  {$valueVal} = call i32 @php_zval_to_int(%struct.zval* {$valuePtr})";
+                $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+                $valueStr = $this->getNextTempVariable();
+                $ir[] = "  {$valueStr} = call i8* @php_zval_to_string(%struct.zval* {$valuePtr})";
 
-            $resultVal = $this->getNextTempVariable();
-            switch ($assignment->operator) {
-                case '+=':
-                    $ir[] = "  {$resultVal} = add i32 {$currentVal}, {$valueVal}";
-                    break;
-                case '-=':
-                    $ir[] = "  {$resultVal} = sub i32 {$currentVal}, {$valueVal}";
-                    break;
-                case '*=':
-                    $ir[] = "  {$resultVal} = mul i32 {$currentVal}, {$valueVal}";
-                    break;
-                case '/=':
-                    $ir[] = "  {$resultVal} = sdiv i32 {$currentVal}, {$valueVal}";
-                    break;
+                $concatResult = $this->getNextTempVariable();
+                $ir[] = "  {$concatResult} = call i8* @php_concat_strings(i8* {$currentStr}, i8* {$valueStr})";
+                $ir[] = "  call void @php_zval_string(%struct.zval* %{$varName}, i8* {$concatResult})";
+            } else {
+                // Numeric compound assignment
+                $currentVal = $this->getNextTempVariable();
+                $ir[] = "  {$currentVal} = call i32 @php_zval_to_int(%struct.zval* %{$varName})";
+
+                $valuePtr = $this->generateExpression($assignment->value, $ir, $globalVars);
+                $valueVal = $this->getNextTempVariable();
+                $ir[] = "  {$valueVal} = call i32 @php_zval_to_int(%struct.zval* {$valuePtr})";
+
+                $resultVal = $this->getNextTempVariable();
+                switch ($assignment->operator) {
+                    case '+=':
+                        $ir[] = "  {$resultVal} = add i32 {$currentVal}, {$valueVal}";
+                        break;
+                    case '-=':
+                        $ir[] = "  {$resultVal} = sub i32 {$currentVal}, {$valueVal}";
+                        break;
+                    case '*=':
+                        $ir[] = "  {$resultVal} = mul i32 {$currentVal}, {$valueVal}";
+                        break;
+                    case '/=':
+                        $ir[] = "  {$resultVal} = sdiv i32 {$currentVal}, {$valueVal}";
+                        break;
+                }
+
+                $ir[] = "  call void @php_zval_int(%struct.zval* %{$varName}, i32 {$resultVal})";
             }
-
-            $ir[] = "  call void @php_zval_int(%struct.zval* %{$varName}, i32 {$resultVal})";
         }
 
         $ir[] = "";
@@ -838,30 +853,44 @@ class Generator
             $ir[] = "  {$value} = load %struct.zval, %struct.zval* {$valuePtr}";
             $ir[] = "  store %struct.zval {$value}, %struct.zval* %{$varName}";
         } else {
-            // Compound assignment (+=, -=, *=, /=)
-            $currentVal = $this->getNextTempVariable();
-            $ir[] = "  {$currentVal} = call i32 @php_zval_to_int(%struct.zval* %{$varName})";
+            // Compound assignment (+=, -=, *=, /=, .=)
+            if ($assignment->operator === '.=') {
+                // String concatenation assignment
+                $currentStr = $this->getNextTempVariable();
+                $ir[] = "  {$currentStr} = call i8* @php_zval_to_string(%struct.zval* %{$varName})";
 
-            $valueVal = $this->getNextTempVariable();
-            $ir[] = "  {$valueVal} = call i32 @php_zval_to_int(%struct.zval* {$valuePtr})";
+                $valueVal = $this->getNextTempVariable();
+                $ir[] = "  {$valueVal} = call i8* @php_zval_to_string(%struct.zval* {$valuePtr})";
 
-            $resultVal = $this->getNextTempVariable();
-            switch ($assignment->operator) {
-                case '+=':
-                    $ir[] = "  {$resultVal} = add i32 {$currentVal}, {$valueVal}";
-                    break;
-                case '-=':
-                    $ir[] = "  {$resultVal} = sub i32 {$currentVal}, {$valueVal}";
-                    break;
-                case '*=':
-                    $ir[] = "  {$resultVal} = mul i32 {$currentVal}, {$valueVal}";
-                    break;
-                case '/=':
-                    $ir[] = "  {$resultVal} = sdiv i32 {$currentVal}, {$valueVal}";
-                    break;
+                $concatResult = $this->getNextTempVariable();
+                $ir[] = "  {$concatResult} = call i8* @php_concat_strings(i8* {$currentStr}, i8* {$valueVal})";
+                $ir[] = "  call void @php_zval_string(%struct.zval* %{$varName}, i8* {$concatResult})";
+            } else {
+                // Numeric compound assignment
+                $currentVal = $this->getNextTempVariable();
+                $ir[] = "  {$currentVal} = call i32 @php_zval_to_int(%struct.zval* %{$varName})";
+
+                $valueVal = $this->getNextTempVariable();
+                $ir[] = "  {$valueVal} = call i32 @php_zval_to_int(%struct.zval* {$valuePtr})";
+
+                $resultVal = $this->getNextTempVariable();
+                switch ($assignment->operator) {
+                    case '+=':
+                        $ir[] = "  {$resultVal} = add i32 {$currentVal}, {$valueVal}";
+                        break;
+                    case '-=':
+                        $ir[] = "  {$resultVal} = sub i32 {$currentVal}, {$valueVal}";
+                        break;
+                    case '*=':
+                        $ir[] = "  {$resultVal} = mul i32 {$currentVal}, {$valueVal}";
+                        break;
+                    case '/=':
+                        $ir[] = "  {$resultVal} = sdiv i32 {$currentVal}, {$valueVal}";
+                        break;
+                }
+
+                $ir[] = "  call void @php_zval_int(%struct.zval* %{$varName}, i32 {$resultVal})";
             }
-
-            $ir[] = "  call void @php_zval_int(%struct.zval* %{$varName}, i32 {$resultVal})";
         }
 
         // Return a pointer to the assigned value (for use in parent expressions)
@@ -904,17 +933,34 @@ class Generator
         $ir[] = "";
     }
 
+    /**
+     * Track which parameters are by reference in the current function
+     */
+    private array $referenceParameters = [];
+
     private function generateFunctionDefinition(FunctionDefinition $funcDef, array &$ir, array $globalVars): void
     {
         // Save and reset declaredVars for function scope
         $savedDeclaredVars = $this->declaredVars;
         $savedFunctionLocalVars = $this->functionLocalVars;
+        $savedReferenceParameters = $this->referenceParameters;
         $this->declaredVars = [];
         $this->functionLocalVars = [];
+        $this->referenceParameters = [];
 
-        // All functions return zval and parameters are zval
-        $paramTypes = implode(', ', array_fill(0, count($funcDef->parameters), '%struct.zval'));
-        $ir[] = "define %struct.zval @{$funcDef->name}({$paramTypes}) {";
+        // Track which parameters are by reference
+        foreach ($funcDef->parameters as $param) {
+            if ($param->byReference) {
+                $this->referenceParameters[] = $param->name;
+            }
+        }
+
+        // Build parameter types - reference parameters are pointers to zval
+        $paramTypes = [];
+        foreach ($funcDef->parameters as $param) {
+            $paramTypes[] = $param->byReference ? '%struct.zval*' : '%struct.zval';
+        }
+        $ir[] = "define %struct.zval @{$funcDef->name}(" . implode(', ', $paramTypes) . ") {";
         $ir[] = "entry:";
 
         // Add parameters to declared vars (they're allocated separately)
@@ -940,8 +986,18 @@ class Generator
 
         // Allocate stack space for parameters
         foreach ($funcDef->parameters as $i => $param) {
-            $ir[] = "  %{$param->name} = alloca %struct.zval";
-            $ir[] = "  store %struct.zval %{$i}, %struct.zval* %{$param->name}";
+            if ($param->byReference) {
+                // For reference parameters, store the pointer to the caller's zval
+                // Then create an alias that points directly to the caller's zval
+                $ir[] = "  %{$param->name}_ptr = alloca %struct.zval*";
+                $ir[] = "  store %struct.zval* %{$i}, %struct.zval** %{$param->name}_ptr";
+                // Now create the actual variable pointing to the caller's zval
+                $ir[] = "  %{$param->name} = load %struct.zval*, %struct.zval** %{$param->name}_ptr";
+            } else {
+                // For value parameters, store in stack space
+                $ir[] = "  %{$param->name} = alloca %struct.zval";
+                $ir[] = "  store %struct.zval %{$i}, %struct.zval* %{$param->name}";
+            }
         }
 
         foreach ($funcDef->body as $statement) {
@@ -974,6 +1030,9 @@ class Generator
         // Restore declaredVars and functionLocalVars for parent scope
         $this->declaredVars = $savedDeclaredVars;
         $this->functionLocalVars = $savedFunctionLocalVars;
+        if (isset($savedReferenceParameters)) {
+            $this->referenceParameters = $savedReferenceParameters;
+        }
     }
 
     private function generateMethodFunction(string $className, MethodDefinition $method, array &$ir, array $globalVars): void
@@ -1064,10 +1123,22 @@ class Generator
         // Restore declaredVars and functionLocalVars for parent scope
         $this->declaredVars = $savedDeclaredVars;
         $this->functionLocalVars = $savedFunctionLocalVars;
+        if (isset($savedReferenceParameters)) {
+            $this->referenceParameters = $savedReferenceParameters;
+        }
     }
 
     private function generateFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
     {
+        // First, find the function definition to know which parameters are by reference
+        $funcDef = null;
+        foreach ($this->statements as $stmt) {
+            if ($stmt instanceof FunctionDefinition && $stmt->name === $funcCall->name) {
+                $funcDef = $stmt;
+                break;
+            }
+        }
+
         // Handle builtin functions specially
         if ($funcCall->name === 'count') {
             $this->generateCountFunctionCall($funcCall, $ir, $globalVars);
@@ -1194,13 +1265,20 @@ class Generator
             return;
         }
 
-        // Generate arguments
+        // Generate arguments - handle reference parameters specially
         $args = [];
-        foreach ($funcCall->arguments as $arg) {
+        foreach ($funcCall->arguments as $i => $arg) {
             $argPtr = $this->generateExpression($arg, $ir, $globalVars);
-            $argVal = $this->getNextTempVariable();
-            $ir[] = "  {$argVal} = load %struct.zval, %struct.zval* {$argPtr}";
-            $args[] = "%struct.zval {$argVal}";
+
+            if ($funcDef && $i < count($funcDef->parameters) && $funcDef->parameters[$i]->byReference) {
+                // For reference parameters, pass the pointer directly
+                $args[] = "%struct.zval* {$argPtr}";
+            } else {
+                // For value parameters, load the value from the pointer
+                $argVal = $this->getNextTempVariable();
+                $ir[] = "  {$argVal} = load %struct.zval, %struct.zval* {$argPtr}";
+                $args[] = "%struct.zval {$argVal}";
+            }
         }
 
         $argStr = implode(', ', $args);
@@ -3158,16 +3236,32 @@ class Generator
                 return $this->generateSettypeExpression($expression, $ir, $globalVars);
             }
 
+            // First, find the function definition to know which parameters are by reference
+            $funcDef = null;
+            foreach ($this->statements as $stmt) {
+                if ($stmt instanceof FunctionDefinition && $stmt->name === $expression->name) {
+                    $funcDef = $stmt;
+                    break;
+                }
+            }
+
             // Function calls as expressions: generate call and return pointer to result zval
             $result = $this->getNextTempVariable();
             $ir[] = "  {$result} = alloca %struct.zval";
 
             $args = [];
-            foreach ($expression->arguments as $arg) {
+            foreach ($expression->arguments as $i => $arg) {
                 $argPtr = $this->generateExpression($arg, $ir, $globalVars);
-                $argVal = $this->getNextTempVariable();
-                $ir[] = "  {$argVal} = load %struct.zval, %struct.zval* {$argPtr}";
-                $args[] = "%struct.zval {$argVal}";
+
+                if ($funcDef && $i < count($funcDef->parameters) && $funcDef->parameters[$i]->byReference) {
+                    // For reference parameters, pass the pointer directly
+                    $args[] = "%struct.zval* {$argPtr}";
+                } else {
+                    // For value parameters, load the value from the pointer
+                    $argVal = $this->getNextTempVariable();
+                    $ir[] = "  {$argVal} = load %struct.zval, %struct.zval* {$argPtr}";
+                    $args[] = "%struct.zval {$argVal}";
+                }
             }
 
             $argStr = implode(', ', $args);
@@ -3936,8 +4030,11 @@ class Generator
             error_log("[LLVM WARNING] Variable '\$" . $varName . "' used before declaration at line " . $varRef->line);
             $ir[] = "  %{$varName} = alloca %struct.zval";
             $this->declaredVars[$varName] = true;
+            return "%" . $varName;
         }
 
+        // For all variables (including reference parameters), just return the address
+        // The reference parameter loading is already handled in generateFunctionDefinition
         return "%" . $varName;
     }
 
