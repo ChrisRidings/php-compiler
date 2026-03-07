@@ -23,7 +23,7 @@ function count_primes($limit) {
 
 $start = microtime(true);
 
-$result = count_primes(2000);
+$result = count_primes(10000000);
 
 $end = microtime(true);
 

@@ -97,11 +97,94 @@ class Generator
         return new self($statements);
     }
 
+    /**
+     * Simple counter for temporary variables (non-zval, like i32, i8*, etc.)
+     */
+    private int $tempVariableCounter = 0;
+
+    /**
+     * Counter for temporary zval slots (pre-allocated in entry block)
+     */
+    private int $tempZvalCounter = 0;
+
+    /**
+     * Maximum number of temp zval slots needed (pre-allocated in entry block)
+     */
+    private int $maxTempZvals = 100;
+
+    /**
+     * Track if temp zval slots have been pre-allocated for current function
+     */
+    private bool $tempZvalsPreAllocated = false;
+
+    /**
+     * Get next temp variable name (for non-zval types like i32, i8*, etc.)
+     * These are NOT pre-allocated and can emit alloca on demand.
+     */
     private function getNextTempVariable(): string
     {
-        static $counter = 0;
-        $var = '%tmp_' . ++$counter;
-        return $var;
+        $this->tempVariableCounter++;
+        return "%tmp_{$this->tempVariableCounter}";
+    }
+
+    /**
+     * Get a pre-allocated temp zval slot.
+     * These are pre-allocated in the entry block and reused across loop iterations.
+     * NO alloca should be emitted when using this - the slot already exists.
+     */
+    private function getNextTempZval(): string
+    {
+        $this->tempZvalCounter++;
+        // If we exceed pre-allocated slots, we have a problem - but 100 should be enough
+        if ($this->tempZvalCounter > $this->maxTempZvals) {
+            // Fallback: allocate more on demand (this shouldn't happen normally)
+            return "%tmp_zval_extra_{$this->tempZvalCounter}";
+        }
+        return "%tmp_zval_{$this->tempZvalCounter}";
+    }
+
+    /**
+     * Reset the temp zval counter at loop headers to enable reuse
+     */
+    private function resetTempZvalCounter(): void
+    {
+        $this->tempZvalCounter = 0;
+    }
+
+    /**
+     * Pre-allocate temp zval slots in the entry block.
+     * This must be called once per function, before any code generation.
+     */
+    private function preAllocateTempZvals(array &$ir): void
+    {
+        if ($this->tempZvalsPreAllocated) {
+            return;
+        }
+
+        // Pre-allocate temp zval slots - these will be reused across loop iterations
+        for ($i = 1; $i <= $this->maxTempZvals; $i++) {
+            $ir[] = "  %tmp_zval_{$i} = alloca %struct.zval";
+        }
+
+        $this->tempZvalsPreAllocated = true;
+        $this->tempZvalCounter = 0;
+    }
+
+    /**
+     * Allocate a temp zval slot. If pre-allocated, just returns the slot name.
+     * If not pre-allocated, emits an alloca instruction.
+     * Use this for all temp zval allocations to avoid stack overflow in loops.
+     */
+    private function allocateTempZval(array &$ir): string
+    {
+        $name = $this->getNextTempZval();
+        // If temps are pre-allocated, the slot already exists - don't emit alloca
+        // If not pre-allocated (e.g., global scope), emit alloca on demand
+        // Also emit alloca for extra slots beyond pre-allocated limit (names starting with %tmp_zval_extra_)
+        if (!$this->tempZvalsPreAllocated || strpos($name, '%tmp_zval_extra_') === 0) {
+            $ir[] = "  {$name} = alloca %struct.zval";
+        }
+        return $name;
     }
 
     public function generate(): string
@@ -119,6 +202,9 @@ class Generator
         $ir[] = "%struct.zval = type { i32, %union.zval_value }";
         $ir[] = "%union.zval_value = type { i64 }"; // on x86_64, all union members are 8 bytes
         $ir[] = "";
+
+        // Note: Temp variables are now allocated inside each function's entry block
+        // to avoid the LLVM IR syntax error of having alloca in global scope
 
     // Declare external zval functions (pass by pointer)
     $ir[] = "declare void @php_echo_zval(%struct.zval*)";
@@ -260,9 +346,17 @@ class Generator
             $this->generateStatement($classDef, $ir, $globalVars);
         }
 
-         // Define main function
+        // Reset temp variable tracking for main function
+        $this->tempVariableCounter = 0;
+        $this->tempZvalCounter = 0;
+        $this->tempZvalsPreAllocated = false;
+
+        // Define main function
         $ir[] = "define i32 @main() {";
         $ir[] = "entry:";
+
+        // Pre-allocate temp zval slots in entry block (reused across loops)
+        $this->preAllocateTempZvals($ir);
 
         // Pre-declare all variables at the entry block to ensure they dominate all uses
         $this->collectAndDeclareVariables($otherStatements, $ir);
@@ -305,8 +399,7 @@ class Generator
                 $callResult = $this->getNextTempVariable();
                 $ir[] = "  {$callResult} = call %struct.zval @{$statement->name}({$argStr})";
                 // Discard the result - store in stack space and then do nothing
-                $resultPtr = $this->getNextTempVariable();
-                $ir[] = "  {$resultPtr} = alloca %struct.zval";
+                $resultPtr = $this->allocateTempZval($ir);
                 $ir[] = "  store %struct.zval {$callResult}, %struct.zval* {$resultPtr}";
             } elseif ($statement instanceof ReturnStatement) {
                 // If it's a return statement at top level, we need to handle it specially
@@ -716,8 +809,7 @@ class Generator
 
         // Always return a zval
         if ($returnStmt->value === null) {
-            $nullResult = $this->getNextTempVariable();
-            $ir[] = "  {$nullResult} = alloca %struct.zval";
+            $nullResult = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_null(%struct.zval* {$nullResult})";
             $loaded = $this->getNextTempVariable();
             $ir[] = "  {$loaded} = load %struct.zval, %struct.zval* {$nullResult}";
@@ -896,8 +988,7 @@ class Generator
         }
 
         // Return a pointer to the assigned value (for use in parent expressions)
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $loadedVal = $this->getNextTempVariable();
         $ir[] = "  {$loadedVal} = load %struct.zval, %struct.zval* %{$varName}";
         $ir[] = "  store %struct.zval {$loadedVal}, %struct.zval* {$resultPtr}";
@@ -946,9 +1037,17 @@ class Generator
         $savedDeclaredVars = $this->declaredVars;
         $savedFunctionLocalVars = $this->functionLocalVars;
         $savedReferenceParameters = $this->referenceParameters;
+        $savedTempVariableCounter = $this->tempVariableCounter;
+        $savedTempZvalCounter = $this->tempZvalCounter;
+        $savedTempZvalsPreAllocated = $this->tempZvalsPreAllocated;
         $this->declaredVars = [];
         $this->functionLocalVars = [];
         $this->referenceParameters = [];
+
+        // Reset temp variable tracking for this function
+        $this->tempVariableCounter = 0;
+        $this->tempZvalCounter = 0;
+        $this->tempZvalsPreAllocated = false;
 
         // Track which parameters are by reference
         foreach ($funcDef->parameters as $param) {
@@ -964,6 +1063,9 @@ class Generator
         }
         $ir[] = "define %struct.zval @{$funcDef->name}(" . implode(', ', $paramTypes) . ") {";
         $ir[] = "entry:";
+
+        // Pre-allocate temp zval slots in entry block (reused across loops)
+        $this->preAllocateTempZvals($ir);
 
         // Add parameters to declared vars (they're allocated separately)
         // Parameters are NOT in functionLocalVars - they are caller's responsibility
@@ -1018,8 +1120,7 @@ class Generator
             // Clean up local variables before implicit return
             $this->generateLocalVarCleanup($ir);
 
-            $nullResult = $this->getNextTempVariable();
-            $ir[] = "  {$nullResult} = alloca %struct.zval";
+            $nullResult = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_null(%struct.zval* {$nullResult})";
             $loaded = $this->getNextTempVariable();
             $ir[] = "  {$loaded} = load %struct.zval, %struct.zval* {$nullResult}";
@@ -1035,6 +1136,9 @@ class Generator
         if (isset($savedReferenceParameters)) {
             $this->referenceParameters = $savedReferenceParameters;
         }
+        $this->tempVariableCounter = $savedTempVariableCounter;
+        $this->tempZvalCounter = $savedTempZvalCounter;
+        $this->tempZvalsPreAllocated = $savedTempZvalsPreAllocated;
     }
 
     private function generateMethodFunction(string $className, MethodDefinition $method, array &$ir, array $globalVars): void
@@ -1042,8 +1146,16 @@ class Generator
         // Save and reset declaredVars for method scope
         $savedDeclaredVars = $this->declaredVars;
         $savedFunctionLocalVars = $this->functionLocalVars;
+        $savedTempVariableCounter = $this->tempVariableCounter;
+        $savedTempZvalCounter = $this->tempZvalCounter;
+        $savedTempZvalsPreAllocated = $this->tempZvalsPreAllocated;
         $this->declaredVars = [];
         $this->functionLocalVars = [];
+
+        // Reset temp variable tracking for this method
+        $this->tempVariableCounter = 0;
+        $this->tempZvalCounter = 0;
+        $this->tempZvalsPreAllocated = false;
 
         // Method name is prefixed with class name: ClassName_methodName
         $methodFuncName = $className . '_' . $method->name;
@@ -1058,6 +1170,9 @@ class Generator
 
         $ir[] = "define %struct.zval @{$methodFuncName}({$paramTypesStr}) {";
         $ir[] = "entry:";
+
+        // Pre-allocate temp zval slots in entry block (reused across loops)
+        $this->preAllocateTempZvals($ir);
 
         // Add parameters and $this to declared vars (they're allocated separately)
         // Parameters are NOT in functionLocalVars - they are caller's responsibility
@@ -1111,8 +1226,7 @@ class Generator
             // Clean up local variables before implicit return
             $this->generateLocalVarCleanup($ir);
 
-            $nullResult = $this->getNextTempVariable();
-            $ir[] = "  {$nullResult} = alloca %struct.zval";
+            $nullResult = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_null(%struct.zval* {$nullResult})";
             $loaded = $this->getNextTempVariable();
             $ir[] = "  {$loaded} = load %struct.zval, %struct.zval* {$nullResult}";
@@ -1128,6 +1242,9 @@ class Generator
         if (isset($savedReferenceParameters)) {
             $this->referenceParameters = $savedReferenceParameters;
         }
+        $this->tempVariableCounter = $savedTempVariableCounter;
+        $this->tempZvalCounter = $savedTempZvalCounter;
+        $this->tempZvalsPreAllocated = $savedTempZvalsPreAllocated;
     }
 
     private function generateFunctionCall(FunctionCall $funcCall, array &$ir, array $globalVars): void
@@ -1305,8 +1422,7 @@ class Generator
         $ir[] = "  {$countResult} = call i32 @php_array_size(%struct.zval* {$argPtr})";
 
         // Store result in a zval (we need to allocate and store, but since this is a statement, we just discard)
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$countResult})";
         $ir[] = "";
     }
@@ -1321,8 +1437,7 @@ class Generator
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_values function
         $ir[] = "  call void @php_array_values(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
@@ -1342,8 +1457,7 @@ class Generator
         $columnKeyPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_column function
         $ir[] = "  call void @php_array_column(%struct.zval* {$argPtr}, %struct.zval* {$columnKeyPtr}, %struct.zval* {$resultPtr})";
@@ -1363,8 +1477,7 @@ class Generator
         $valuesPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_combine function
         $ir[] = "  call void @php_array_combine(%struct.zval* {$keysPtr}, %struct.zval* {$valuesPtr}, %struct.zval* {$resultPtr})";
@@ -1391,8 +1504,7 @@ class Generator
         $valuePtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_fill function
         $ir[] = "  call void @php_array_fill(i32 {$startIndexInt}, i32 {$numInt}, %struct.zval* {$valuePtr}, %struct.zval* {$resultPtr})";
@@ -1412,8 +1524,7 @@ class Generator
         $valuePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_fill_keys function
         $ir[] = "  call void @php_array_fill_keys(%struct.zval* {$keysPtr}, %struct.zval* {$valuePtr}, %struct.zval* {$resultPtr})";
@@ -1434,8 +1545,7 @@ class Generator
         $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_merge function
         $ir[] = "  call void @php_array_merge(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
@@ -1455,8 +1565,7 @@ class Generator
         $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_merge_recursive function
         $ir[] = "  call void @php_array_merge_recursive(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
@@ -1476,8 +1585,7 @@ class Generator
         $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_replace function
         $ir[] = "  call void @php_array_replace(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
@@ -1497,8 +1605,7 @@ class Generator
         $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_replace_recursive function
         $ir[] = "  call void @php_array_replace_recursive(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
@@ -1518,8 +1625,7 @@ class Generator
         $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_replace function
         $ir[] = "  call void @php_array_replace(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
@@ -1540,8 +1646,7 @@ class Generator
         $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_replace_recursive function
         $ir[] = "  call void @php_array_replace_recursive(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
@@ -1567,8 +1672,7 @@ class Generator
         $padValuePtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_pad function
         $ir[] = "  call void @php_array_pad(%struct.zval* {$arrPtr}, i32 {$sizeInt}, %struct.zval* {$padValuePtr}, %struct.zval* {$resultPtr})";
@@ -1637,8 +1741,7 @@ class Generator
         $arrayPtr = "%{$arrayVarName}";
 
         // Pop the last element from the array - allocate result and call function
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_array_pop(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
         $ir[] = "";
     }
@@ -1659,8 +1762,7 @@ class Generator
         $arrayPtr = "%{$arrayVarName}";
 
         // Shift the first element from the array - allocate result and call function
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_array_shift(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
         $ir[] = "";
     }
@@ -1697,8 +1799,7 @@ class Generator
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_slice
         if (is_int($lengthInt) && $lengthInt === 0 && is_int($preserveKeys) && $preserveKeys === 0) {
@@ -1741,8 +1842,7 @@ class Generator
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_change_key_case function
         $ir[] = "  call void @php_array_change_key_case(%struct.zval* {$argPtr}, i32 {$caseType}, %struct.zval* {$resultPtr})";
@@ -1773,8 +1873,7 @@ class Generator
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_chunk function
         if (count($funcCall->arguments) > 2) {
@@ -1795,8 +1894,7 @@ class Generator
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_opendir function
         $ir[] = "  call void @php_opendir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
@@ -1813,8 +1911,7 @@ class Generator
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_readdir function
         $ir[] = "  call void @php_readdir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
@@ -1831,8 +1928,7 @@ class Generator
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_closedir function
         $ir[] = "  call void @php_closedir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
@@ -1852,8 +1948,7 @@ class Generator
         $subjectPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_preg_match function
         $ir[] = "  call void @php_preg_match(%struct.zval* {$patternPtr}, %struct.zval* {$subjectPtr}, %struct.zval* {$resultPtr})";
@@ -1870,8 +1965,7 @@ class Generator
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_natsort function
         $ir[] = "  call void @php_natsort(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
@@ -1888,8 +1982,7 @@ class Generator
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_print_r function
         $ir[] = "  call void @php_print_r(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
@@ -1923,8 +2016,7 @@ class Generator
         $countPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_str_repeat function
         $ir[] = "  call void @php_str_repeat(%struct.zval* {$strPtr}, %struct.zval* {$countPtr}, %struct.zval* {$resultPtr})";
@@ -1941,8 +2033,7 @@ class Generator
         $strPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_trim function
         $ir[] = "  call void @php_trim(%struct.zval* {$strPtr}, %struct.zval* {$resultPtr})";
@@ -1959,8 +2050,7 @@ class Generator
         $pathPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_file_exists function
         $ir[] = "  call void @php_file_exists(%struct.zval* {$pathPtr}, %struct.zval* {$resultPtr})";
@@ -1977,8 +2067,7 @@ class Generator
         $cmdPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_shell_exec function
         $ir[] = "  call void @php_shell_exec(%struct.zval* {$cmdPtr}, %struct.zval* {$resultPtr})";
@@ -1998,14 +2087,12 @@ class Generator
         if (count($funcCall->arguments) > 1) {
             $optionsPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
         } else {
-            $optionsPtr = $this->getNextTempVariable();
-            $ir[] = "  {$optionsPtr} = alloca %struct.zval";
+            $optionsPtr = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_int(%struct.zval* {$optionsPtr}, i32 0)";
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_pathinfo function
         $ir[] = "  call void @php_pathinfo(%struct.zval* {$pathPtr}, %struct.zval* {$optionsPtr}, %struct.zval* {$resultPtr})";
@@ -2025,8 +2112,7 @@ class Generator
         $newnamePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_rename function
         $ir[] = "  call void @php_rename(%struct.zval* {$oldnamePtr}, %struct.zval* {$newnamePtr}, %struct.zval* {$resultPtr})";
@@ -2043,8 +2129,7 @@ class Generator
         $filenamePtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_unlink function
         $ir[] = "  call void @php_unlink(%struct.zval* {$filenamePtr}, %struct.zval* {$resultPtr})";
@@ -2067,8 +2152,7 @@ class Generator
         $subjectPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_str_replace function
         $ir[] = "  call void @php_str_replace(%struct.zval* {$searchPtr}, %struct.zval* {$replacePtr}, %struct.zval* {$subjectPtr}, %struct.zval* {$resultPtr})";
@@ -2108,8 +2192,7 @@ class Generator
         $ir[] = "  {$isIntResult} = call i32 @php_is_int(%struct.zval* {$argPtr})";
 
         // Store result in a zval (we need to allocate and store, but since this is a statement, we just discard)
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$isIntResult})";
         $ir[] = "";
     }
@@ -2128,8 +2211,7 @@ class Generator
         $ir[] = "  {$issetResult} = call i32 @php_isset(%struct.zval* {$argPtr})";
 
         // Store result in a zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$issetResult})";
         $ir[] = "";
     }
@@ -2165,8 +2247,7 @@ class Generator
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_values function
         $ir[] = "  call void @php_array_values(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
@@ -2187,8 +2268,7 @@ class Generator
         $columnKeyPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_column function
         $ir[] = "  call void @php_array_column(%struct.zval* {$argPtr}, %struct.zval* {$columnKeyPtr}, %struct.zval* {$resultPtr})";
@@ -2225,8 +2305,7 @@ class Generator
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_change_key_case function
         $ir[] = "  call void @php_array_change_key_case(%struct.zval* {$argPtr}, i32 {$caseType}, %struct.zval* {$resultPtr})";
@@ -2258,8 +2337,7 @@ class Generator
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_chunk function
         if (count($funcCall->arguments) > 2) {
@@ -2284,8 +2362,7 @@ class Generator
         $valuesPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_combine function
         $ir[] = "  call void @php_array_combine(%struct.zval* {$keysPtr}, %struct.zval* {$valuesPtr}, %struct.zval* {$resultPtr})";
@@ -2313,8 +2390,7 @@ class Generator
         $valuePtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_fill function
         $ir[] = "  call void @php_array_fill(i32 {$startIndexInt}, i32 {$numInt}, %struct.zval* {$valuePtr}, %struct.zval* {$resultPtr})";
@@ -2335,8 +2411,7 @@ class Generator
         $valuePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_fill_keys function
         $ir[] = "  call void @php_array_fill_keys(%struct.zval* {$keysPtr}, %struct.zval* {$valuePtr}, %struct.zval* {$resultPtr})";
@@ -2358,8 +2433,7 @@ class Generator
         $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_merge function
         $ir[] = "  call void @php_array_merge(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
@@ -2380,8 +2454,7 @@ class Generator
         $arr2Ptr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_merge_recursive function
         $ir[] = "  call void @php_array_merge_recursive(%struct.zval* {$arr1Ptr}, %struct.zval* {$arr2Ptr}, %struct.zval* {$resultPtr})";
@@ -2407,8 +2480,7 @@ class Generator
         $padValuePtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_pad function
         $ir[] = "  call void @php_array_pad(%struct.zval* {$arrPtr}, i32 {$sizeInt}, %struct.zval* {$padValuePtr}, %struct.zval* {$resultPtr})";
@@ -2441,8 +2513,7 @@ class Generator
         }
 
         // Allocate result zval with the last count
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$lastCount})";
 
         return $resultPtr;
@@ -2473,8 +2544,7 @@ class Generator
         }
 
         // Allocate result zval with the last count
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$lastCount})";
 
         return $resultPtr;
@@ -2496,8 +2566,7 @@ class Generator
         $arrayPtr = "%{$arrayVarName}";
 
         // Pop the last element from the array
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_array_pop(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
 
         return $resultPtr;
@@ -2519,8 +2588,7 @@ class Generator
         $arrayPtr = "%{$arrayVarName}";
 
         // Shift the first element from the array
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_array_shift(%struct.zval* {$arrayPtr}, %struct.zval* {$resultPtr})";
 
         return $resultPtr;
@@ -2558,8 +2626,7 @@ class Generator
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_slice
         if (count($funcCall->arguments) > 3) {
@@ -2608,8 +2675,7 @@ class Generator
         }
 
         // Allocate result zval for removed elements
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_splice
         if (count($funcCall->arguments) > 3) {
@@ -2655,8 +2721,7 @@ class Generator
         }
 
         // Allocate result zval for removed elements
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_array_splice
         if (count($funcCall->arguments) > 3) {
@@ -2675,8 +2740,7 @@ class Generator
         }
 
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_opendir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
         return $resultPtr;
     }
@@ -2688,8 +2752,7 @@ class Generator
         }
 
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_readdir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
         return $resultPtr;
     }
@@ -2701,8 +2764,7 @@ class Generator
         }
 
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_closedir(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
         return $resultPtr;
     }
@@ -2715,8 +2777,7 @@ class Generator
 
         $patternPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
         $subjectPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_preg_match(%struct.zval* {$patternPtr}, %struct.zval* {$subjectPtr}, %struct.zval* {$resultPtr})";
         return $resultPtr;
     }
@@ -2728,8 +2789,7 @@ class Generator
         }
 
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_natsort(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
         return $resultPtr;
     }
@@ -2741,8 +2801,7 @@ class Generator
         }
 
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_print_r(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
         return $resultPtr;
     }
@@ -2760,8 +2819,7 @@ class Generator
         $ir[] = "  call void @php_var_dump(%struct.zval* {$argPtr})";
 
         // Return NULL zval since var_dump returns void
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_null(%struct.zval* {$resultPtr})";
 
         return $resultPtr;
@@ -2775,8 +2833,7 @@ class Generator
 
         $strPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
         $countPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_str_repeat(%struct.zval* {$strPtr}, %struct.zval* {$countPtr}, %struct.zval* {$resultPtr})";
         return $resultPtr;
     }
@@ -2789,8 +2846,7 @@ class Generator
 
         $strPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_trim(%struct.zval* {$strPtr}, %struct.zval* {$resultPtr})";
 
         return $resultPtr;
@@ -2803,8 +2859,7 @@ class Generator
         }
 
         $pathPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_file_exists(%struct.zval* {$pathPtr}, %struct.zval* {$resultPtr})";
         return $resultPtr;
     }
@@ -2822,8 +2877,7 @@ class Generator
         $shellExecCounter++;
         $resultPtr = "%shell_exec_result_" . $shellExecCounter;
 
-        // Allocate in entry block to ensure it dominates all uses
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_shell_exec(%struct.zval* {$cmdPtr}, %struct.zval* {$resultPtr})";
 
         return $resultPtr;
@@ -2842,14 +2896,12 @@ class Generator
         if (count($funcCall->arguments) > 1) {
             $optionsPtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
         } else {
-            $optionsPtr = $this->getNextTempVariable();
-            $ir[] = "  {$optionsPtr} = alloca %struct.zval";
+            $optionsPtr = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_int(%struct.zval* {$optionsPtr}, i32 0)";
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_pathinfo function
         $ir[] = "  call void @php_pathinfo(%struct.zval* {$pathPtr}, %struct.zval* {$optionsPtr}, %struct.zval* {$resultPtr})";
@@ -2869,8 +2921,7 @@ class Generator
         $newnamePtr = $this->generateExpression($funcCall->arguments[1], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_rename function
         $ir[] = "  call void @php_rename(%struct.zval* {$oldnamePtr}, %struct.zval* {$newnamePtr}, %struct.zval* {$resultPtr})";
@@ -2887,8 +2938,7 @@ class Generator
         $filenamePtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_unlink function
         $ir[] = "  call void @php_unlink(%struct.zval* {$filenamePtr}, %struct.zval* {$resultPtr})";
@@ -2911,8 +2961,7 @@ class Generator
         $subjectPtr = $this->generateExpression($funcCall->arguments[2], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_str_replace function
         $ir[] = "  call void @php_str_replace(%struct.zval* {$searchPtr}, %struct.zval* {$replacePtr}, %struct.zval* {$subjectPtr}, %struct.zval* {$resultPtr})";
@@ -2933,8 +2982,7 @@ class Generator
         $ir[] = "  {$countResult} = call i32 @php_array_size(%struct.zval* {$argPtr})";
 
         // Store result in a zval and return pointer
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$countResult})";
 
         return $resultPtr;
@@ -2954,8 +3002,7 @@ class Generator
         $ir[] = "  {$isIntResult} = call i32 @php_is_int(%struct.zval* {$argPtr})";
 
         // Store result in a zval and return pointer
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$isIntResult})";
 
         return $resultPtr;
@@ -2975,8 +3022,7 @@ class Generator
         $ir[] = "  {$issetResult} = call i32 @php_isset(%struct.zval* {$argPtr})";
 
         // Store result in a zval and return pointer
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$issetResult})";
 
         return $resultPtr;
@@ -2996,8 +3042,7 @@ class Generator
         $ir[] = "  {$emptyResult} = call i32 @php_empty(%struct.zval* {$argPtr})";
 
         // Store result in a zval (we need to allocate and store, but since this is a statement, we just discard)
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$emptyResult})";
         $ir[] = "";
     }
@@ -3016,8 +3061,7 @@ class Generator
         $ir[] = "  {$emptyResult} = call i32 @php_empty(%struct.zval* {$argPtr})";
 
         // Store result in a zval and return pointer
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$emptyResult})";
 
         return $resultPtr;
@@ -3033,8 +3077,7 @@ class Generator
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_gettype(arg, result)
         $ir[] = "  call void @php_gettype(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
@@ -3053,8 +3096,7 @@ class Generator
         $argPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_gettype(arg, result)
         $ir[] = "  call void @php_gettype(%struct.zval* {$argPtr}, %struct.zval* {$resultPtr})";
@@ -3092,8 +3134,7 @@ class Generator
         $ir[] = "  {$resultVar} = call i32 @php_settype(%struct.zval* {$varPtr}, i8* {$typeStrVal})";
 
         // Store result in a zval (boolean indicating success)
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$resultPtr}, i32 {$resultVar})";
 
         return $resultPtr;
@@ -3142,14 +3183,12 @@ class Generator
             $getAsFloatPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
         } else {
             // Default to false
-            $getAsFloatPtr = $this->getNextTempVariable();
-            $ir[] = "  {$getAsFloatPtr} = alloca %struct.zval";
+            $getAsFloatPtr = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_bool(%struct.zval* {$getAsFloatPtr}, i32 0)";
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_microtime function
         $ir[] = "  call void @php_microtime(%struct.zval* {$getAsFloatPtr}, %struct.zval* {$resultPtr})";
@@ -3166,14 +3205,12 @@ class Generator
             $getAsFloatPtr = $this->generateExpression($funcCall->arguments[0], $ir, $globalVars);
         } else {
             // Default to false
-            $getAsFloatPtr = $this->getNextTempVariable();
-            $ir[] = "  {$getAsFloatPtr} = alloca %struct.zval";
+            $getAsFloatPtr = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_bool(%struct.zval* {$getAsFloatPtr}, i32 0)";
         }
 
         // Allocate result zval
-        $resultPtr = $this->getNextTempVariable();
-        $ir[] = "  {$resultPtr} = alloca %struct.zval";
+        $resultPtr = $this->allocateTempZval($ir);
 
         // Call php_microtime function
         $ir[] = "  call void @php_microtime(%struct.zval* {$getAsFloatPtr}, %struct.zval* {$resultPtr})";
@@ -3302,8 +3339,7 @@ class Generator
             }
 
             // Function calls as expressions: generate call and return pointer to result zval
-            $result = $this->getNextTempVariable();
-            $ir[] = "  {$result} = alloca %struct.zval";
+            $result = $this->allocateTempZval($ir);
 
             $args = [];
             foreach ($expression->arguments as $i => $arg) {
@@ -3362,8 +3398,7 @@ class Generator
         $exprPtr = $this->generateExpression($cast->expression, $ir, $globalVars);
 
         // Allocate result zval
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
 
         // Handle different cast types
         $castType = strtolower($cast->type);
@@ -3457,7 +3492,7 @@ class Generator
         $ir[] = "  {$phiResult} = phi %struct.zval [ {$trueValue}, %{$thenBlock} ], [ {$falseValue}, %{$elseBlock} ]";
 
         // Allocate and store the result
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
         $ir[] = "  store %struct.zval {$phiResult}, %struct.zval* {$result}";
 
         return $result;
@@ -3465,8 +3500,7 @@ class Generator
 
     private function generateIntegerLiteral(IntegerLiteral $literal, array &$ir, array $globalVars): string
     {
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 " . $literal->value . ")";
         // We can't return the struct directly, but since we'll be passing pointers around,
         // return the pointer here
@@ -3475,8 +3509,7 @@ class Generator
 
     private function generateBooleanLiteral(BooleanLiteral $literal, array &$ir, array $globalVars): string
     {
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
         $boolVal = $literal->value ? 1 : 0;
         $ir[] = "  call void @php_zval_bool(%struct.zval* {$result}, i32 {$boolVal})";
         return $result;
@@ -3484,8 +3517,7 @@ class Generator
 
     private function generateNullLiteral(NullLiteral $literal, array &$ir, array $globalVars): string
     {
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_null(%struct.zval* {$result})";
         return $result;
     }
@@ -3501,16 +3533,14 @@ class Generator
 
         // Check for null constant
         if (strtolower($constant->name) === 'null') {
-            $result = $this->getNextTempVariable();
-            $ir[] = "  {$result} = alloca %struct.zval";
+            $result = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_null(%struct.zval* {$result})";
             return $result;
         }
 
         $value = $constantValues[$constant->name] ?? 0;
 
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_int(%struct.zval* {$result}, i32 {$value})";
         return $result;
     }
@@ -3518,8 +3548,7 @@ class Generator
     private function generateUnaryOperation(UnaryOperation $op, array &$ir, array $globalVars): string
     {
         $operandPtr = $this->generateExpression($op->operand, $ir, $globalVars);
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
 
         switch ($op->operator) {
             case '!':
@@ -3549,8 +3578,7 @@ class Generator
         $leftZval = $this->generateExpression($op->left, $ir, $globalVars);
         $rightZval = $this->generateExpression($op->right, $ir, $globalVars);
 
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
 
         switch ($op->operator) {
             case '+':
@@ -3737,6 +3765,10 @@ class Generator
 
         // Loop header block
         $ir[] = "{$loopHeaderBlock}:";
+
+        // Reset temp zval counter to reuse temp slots across iterations
+        $this->resetTempZvalCounter();
+
         if ($forStmt->condition) {
             $conditionPtr = $this->generateExpression($forStmt->condition, $ir, $globalVars);
 
@@ -3806,6 +3838,10 @@ class Generator
 
         // Loop header block - evaluate condition
         $ir[] = "{$loopHeaderBlock}:";
+
+        // Reset temp zval counter to reuse temp slots across iterations
+        $this->resetTempZvalCounter();
+
         $conditionPtr = $this->generateExpression($whileStmt->condition, $ir, $globalVars);
 
         // Convert condition to integer for boolean check
@@ -3854,6 +3890,10 @@ class Generator
 
         // Loop body block
         $ir[] = "{$loopBodyBlock}:";
+
+        // Reset temp zval counter to reuse temp slots across iterations
+        $this->resetTempZvalCounter();
+
         foreach ($doWhileStmt->body as $statement) {
             $this->generateStatement($statement, $ir, $globalVars);
         }
@@ -3863,6 +3903,10 @@ class Generator
 
         // Loop header block - evaluate condition
         $ir[] = "{$loopHeaderBlock}:";
+
+        // Reset temp zval counter for condition evaluation
+        $this->resetTempZvalCounter();
+
         $conditionPtr = $this->generateExpression($doWhileStmt->condition, $ir, $globalVars);
 
         // Convert condition to integer for boolean check
@@ -3919,6 +3963,10 @@ class Generator
 
         // Loop header block - check if index < array_size
         $ir[] = "{$loopHeaderBlock}:";
+
+        // Reset temp zval counter to reuse temp slots across iterations
+        $this->resetTempZvalCounter();
+
         $currentIndex = $this->getNextTempVariable();
         $ir[] = "  {$currentIndex} = load i32, i32* {$indexVar}";
 
@@ -3930,12 +3978,10 @@ class Generator
         $ir[] = "{$loopBodyBlock}:";
 
         // Get array element at current index: $array[$currentIndex]
-        $indexZval = $this->getNextTempVariable();
-        $ir[] = "  {$indexZval} = alloca %struct.zval";
+        $indexZval = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_int(%struct.zval* {$indexZval}, i32 {$currentIndex})";
 
-        $elemZval = $this->getNextTempVariable();
-        $ir[] = "  {$elemZval} = alloca %struct.zval";
+        $elemZval = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_array_get(%struct.zval* {$elemZval}, %struct.zval* {$arrayPtr}, %struct.zval* {$indexZval})";
 
         // Store element in value variable
@@ -4027,31 +4073,39 @@ class Generator
         // Generate then block
         $ir[] = "{$thenBlock}:";
         $thenHasReturn = false;
+        $thenHasBreakOrContinue = false;
         foreach ($ifStmt->thenBody as $statement) {
             $this->generateStatement($statement, $ir, $globalVars, $inFunction);
             if ($statement instanceof ReturnStatement) {
                 $thenHasReturn = true;
             }
+            if ($statement instanceof BreakStatement || $statement instanceof ContinueStatement) {
+                $thenHasBreakOrContinue = true;
+            }
         }
-        if (!$thenHasReturn) {
+        if (!$thenHasReturn && !$thenHasBreakOrContinue) {
             $ir[] = "  br label %{$mergeBlock}";
         }
 
         // Generate else block
         $ir[] = "{$elseBlock}:";
         $elseHasReturn = false;
+        $elseHasBreakOrContinue = false;
         foreach ($ifStmt->elseBody as $statement) {
             $this->generateStatement($statement, $ir, $globalVars, $inFunction);
             if ($statement instanceof ReturnStatement) {
                 $elseHasReturn = true;
             }
+            if ($statement instanceof BreakStatement || $statement instanceof ContinueStatement) {
+                $elseHasBreakOrContinue = true;
+            }
         }
-        if (!$elseHasReturn) {
+        if (!$elseHasReturn && !$elseHasBreakOrContinue) {
             $ir[] = "  br label %{$mergeBlock}";
         }
 
         // Generate merge block (only if at least one branch continues)
-        if (!$thenHasReturn || !$elseHasReturn) {
+        if (!$thenHasReturn && !$thenHasBreakOrContinue || !$elseHasReturn && !$elseHasBreakOrContinue) {
             $ir[] = "{$mergeBlock}:";
             $ir[] = "";
         }
@@ -4115,8 +4169,7 @@ class Generator
         $ptrName = $this->getNextTempVariable();
         $ir[] = "  {$ptrName} = getelementptr inbounds [{$globalData['length']} x i8], [{$globalData['length']} x i8]* @{$globalName}, i64 0, i64 0";
 
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
         $ir[] = "  call void @php_zval_string_literal(%struct.zval* {$result}, i8* {$ptrName})";
         return $result;
     }
@@ -4125,8 +4178,7 @@ class Generator
     {
         // For now, we'll create a simple array representation using an alloca'd pointer
         // This is a simplified approach - arrays are stored as pointers to zval arrays
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
 
         // Call runtime function to create array with given size
         $sizeVal = count($arrayLit->elements);
@@ -4167,8 +4219,7 @@ class Generator
         $arrayPtr = $this->generateExpression($arrayAccess->array, $ir, $globalVars);
 
         // Allocate result zval
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
 
         // Check if this is an array push access (null index) - shouldn't happen in read context
         // but we handle it gracefully
@@ -4190,8 +4241,7 @@ class Generator
     private function generateNewExpression(NewExpression $newExpr, array &$ir, array $globalVars): string
     {
         // Allocate result zval
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
 
         // Get the class name as a string constant
         $className = $newExpr->className;
@@ -4223,8 +4273,7 @@ class Generator
         $objPtr = $this->generateExpression($propAccess->object, $ir, $globalVars);
 
         // Allocate result zval
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
 
         // Get the property name as a string constant
         $propName = $propAccess->propertyName;
@@ -4287,8 +4336,7 @@ class Generator
         $argStr = implode(', ', $args);
 
         // Allocate result
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
 
         // Call the method function
         $callResult = $this->getNextTempVariable();
@@ -4331,8 +4379,7 @@ class Generator
         } else {
             // Compound assignment (+=, -=, *=, /=)
             // First, get the current property value
-            $currentValPtr = $this->getNextTempVariable();
-            $ir[] = "  {$currentValPtr} = alloca %struct.zval";
+            $currentValPtr = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_object_property_get(%struct.zval* {$currentValPtr}, %struct.zval* {$objPtr}, i8* {$propNamePtr})";
 
             // Get current value as integer
@@ -4362,8 +4409,7 @@ class Generator
             }
 
             // Store result in a zval
-            $resultPtr = $this->getNextTempVariable();
-            $ir[] = "  {$resultPtr} = alloca %struct.zval";
+            $resultPtr = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$resultInt})";
 
             // Set the property to the new value
@@ -4403,8 +4449,7 @@ class Generator
             $ir[] = "  call void @php_object_property_set(%struct.zval* {$objPtr}, i8* {$propNamePtr}, %struct.zval* {$valuePtr})";
 
             // Return a pointer to the assigned value
-            $resultPtr = $this->getNextTempVariable();
-            $ir[] = "  {$resultPtr} = alloca %struct.zval";
+            $resultPtr = $this->allocateTempZval($ir);
             $loadedVal = $this->getNextTempVariable();
             $ir[] = "  {$loadedVal} = load %struct.zval, %struct.zval* {$valuePtr}";
             $ir[] = "  store %struct.zval {$loadedVal}, %struct.zval* {$resultPtr}";
@@ -4412,8 +4457,7 @@ class Generator
         } else {
             // Compound assignment (+=, -=, *=, /=)
             // First, get the current property value
-            $currentValPtr = $this->getNextTempVariable();
-            $ir[] = "  {$currentValPtr} = alloca %struct.zval";
+            $currentValPtr = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_object_property_get(%struct.zval* {$currentValPtr}, %struct.zval* {$objPtr}, i8* {$propNamePtr})";
 
             // Get current value as integer
@@ -4443,8 +4487,7 @@ class Generator
             }
 
             // Store result in a zval
-            $resultPtr = $this->getNextTempVariable();
-            $ir[] = "  {$resultPtr} = alloca %struct.zval";
+            $resultPtr = $this->allocateTempZval($ir);
             $ir[] = "  call void @php_zval_int(%struct.zval* {$resultPtr}, i32 {$resultInt})";
 
             // Set the property to the new value
@@ -4485,8 +4528,7 @@ class Generator
         $funcNamePtr = $this->generateExpression($varFuncCall->nameExpression, $ir, $globalVars);
 
         // Allocate result zval
-        $result = $this->getNextTempVariable();
-        $ir[] = "  {$result} = alloca %struct.zval";
+        $result = $this->allocateTempZval($ir);
 
         // Generate arguments - pass as array of zvals
         $argCount = count($varFuncCall->arguments);
